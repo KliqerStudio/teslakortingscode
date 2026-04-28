@@ -14,122 +14,127 @@ import { termsUrl } from "@/lib/site";
 
 export const navItems = [
   { href: "#hoe-het-werkt", label: "Hoe het werkt" },
-  { href: "#voordeel", label: "Deal check" },
+  { href: "#voordeel", label: "Voordeel" },
   { href: "#modellen", label: "Modellen" },
-  { href: "/blog", label: "FSD blog" },
+  { href: "/blog", label: "Blog" },
   { href: "#faq", label: "FAQ" }
 ];
 
 export const heroCopy = {
   title:
-    "Tesla kortingscode en referral voordeel: mogelijk 2.000 gratis Supercharging kilometers of €500 voordeel",
+    "Tesla kortingscode 2026 — mogelijk 2.000 gratis Supercharging km of €500 korting",
   subtitle:
-    "Bestel je binnenkort een nieuwe Tesla? Open de Tesla deal-link vóórdat je je bestelling plaatst en controleer altijd het actuele voordeel op de officiële Tesla-website."
+    "Bestel je binnenkort een Tesla? Open de gratis referral link vóór je bestelling en ontvang mogelijk een Tesla-kortingscode benefit. Controleer altijd het actuele aanbod op de officiële Tesla-website."
 };
 
 export const steps = [
-  "Open de Tesla deal-link.",
+  "Klik op 'Open Tesla deal' hieronder.",
   "Kies je Tesla op de officiële Tesla-website.",
-  "Controleer of het referral voordeel zichtbaar is.",
-  "Plaats pas daarna je bestelling.",
-  "Lees altijd de actuele voorwaarden van Tesla."
+  "Controleer of het referral voordeel zichtbaar is in de checkout.",
+  "Plaats daarna pas je bestelling.",
+  "Lees altijd de actuele Tesla-voorwaarden."
 ];
 
 export const trustItems = [
   {
     icon: ShieldCheck,
-    title: "Onafhankelijke dealgids",
-    text: "Deze website is een transparante coupon- en referral-gids, niet een officiële Tesla-pagina."
+    title: "100% gratis te gebruiken",
+    text: "De referral link kost u niets. U bestelt en betaalt uitsluitend via de officiële Tesla-website."
   },
   {
     icon: BadgeCheck,
-    title: "Geen verborgen kosten",
-    text: "De link stuurt u direct naar Tesla. U bestelt en betaalt uitsluitend via de officiële Tesla-website."
+    title: "Onafhankelijke dealgids",
+    text: "Wij zijn geen officiële Tesla-pagina. Wij helpen u de referral link correct toe te passen voor uw bestelling."
   },
   {
     icon: ExternalLink,
-    title: "Directe Tesla-checkout",
-    text: "De actieknoppen openen Tesla zodat u de actuele benefit in de officiële checkout kunt controleren."
+    title: "Direct naar Tesla checkout",
+    text: "Alle knoppen openen de officiële Tesla-website. U controleert de actuele benefit zelf in de checkout."
   },
   {
     icon: FileText,
-    title: "Voorwaarden centraal",
-    text: "Controleer altijd het actuele voordeel, de beschikbaarheid en de voorwaarden voordat u bestelt."
+    title: "Altijd voorwaarden controleren",
+    text: "Referral benefits kunnen wijzigen per datum, model en account. Controleer de actuele voorwaarden bij Tesla."
   },
   {
     icon: Sparkles,
-    title: "Heldere uitleg",
-    text: "Geen gegarandeerde kortingsclaims, maar een praktische uitleg van de stappen en aandachtspunten."
+    title: "Heldere stap-voor-stap uitleg",
+    text: "Geen verborgen stappen. We leggen exact uit hoe u de Tesla referral link gebruikt vóór uw bestelling."
   },
   {
     icon: CircleAlert,
     title: "Geen affiliatie met Tesla",
-    text: "Tesla, Model S, Model 3, Model X, Model Y en Supercharging zijn handelsmerken van Tesla, Inc."
+    text: "Tesla, Model 3, Model Y, Model S, Model X en Supercharging zijn handelsmerken van Tesla, Inc."
   }
 ];
 
-export const models = ["Model 3", "Model Y", "Model S", "Model X"].map((name) => ({
-  name,
+export const models = [
+  { name: "Model 3", badge: "Populairste keuze" },
+  { name: "Model Y", badge: "Meest verkocht NL" },
+  { name: "Model S", badge: "Flagship" },
+  { name: "Model X", badge: "SUV" }
+].map((m) => ({
+  ...m,
   description:
-    "Controleer op Tesla.nl of dit model momenteel in aanmerking komt voor referral voordelen."
+    "Controleer op Tesla.nl of dit model momenteel in aanmerking komt voor referral voordelen en gratis Supercharging."
 }));
 
 export const faqs = [
   {
-    question: "Wat is een Tesla referral link?",
+    question: "Wat is een Tesla kortingscode of referral link?",
     answer:
-      "Een Tesla referral link is een link waarmee Tesla volgens de actuele voorwaarden een buyer benefit kan tonen bij aankoop van een eligible Tesla-product, zoals Supercharging kilometers of korting."
+      "Een Tesla kortingscode (referral link) is een persoonlijke link waarmee Tesla volgens de actuele voorwaarden een buyer benefit kan tonen bij aankoop van een eligible Tesla — zoals 2.000 gratis Supercharging kilometers of €500 korting."
   },
   {
-    question: "Hoe gebruik ik de Tesla deal-link?",
+    question: "Hoe gebruik ik de Tesla referral link?",
     answer:
-      "Open de deal-link voordat u bestelt, kies uw Tesla op de officiële Tesla-website en controleer tijdens het bestelproces of het referral voordeel zichtbaar is."
+      "Klik op 'Open Tesla deal', kies uw Tesla op de officiële Tesla-website en controleer of het referral voordeel zichtbaar is in de checkout. Plaats uw bestelling pas daarna."
   },
   {
     question: "Kan ik de referral link achteraf toevoegen?",
     answer:
-      "Volgens Tesla kunnen referral-links niet worden toegepast nadat een bestelling al is geplaatst. Open daarom eerst de deal-link en controleer het voordeel voordat u de order afrondt."
+      "Nee. Volgens Tesla kunnen referral-links niet worden toegepast nadat een bestelling is geplaatst. Open daarom eerst de link en controleer het voordeel vóór uw order."
   },
   {
-    question: "Krijg ik altijd 2.000 gratis Supercharging kilometers of €500 korting?",
+    question: "Krijg ik gegarandeerd 2.000 Supercharging km of €500 korting?",
     answer:
-      "Nee. Dit mag u niet als gegarandeerd voordeel zien. Referral benefits, eligibility en beschikbaarheid kunnen verschillen per land, datum, account, model en Tesla-programma. Controleer altijd de actuele Tesla-voorwaarden en de checkout."
+      "Nee — referral benefits zijn niet gegarandeerd. Beschikbaarheid, eligibility en het exacte voordeel kunnen wijzigen per land, datum, model en Tesla-account. Controleer altijd de actuele Tesla-voorwaarden en de checkout."
   },
   {
-    question: "Werkt deze deal-link in Nederland?",
+    question: "Werkt deze referral link in Nederland?",
     answer:
-      "De link is bedoeld voor mensen in Nederland die via de officiële Tesla-website bestellen. Controleer op Tesla.nl en in de checkout of het actuele referral voordeel zichtbaar is voor uw bestelling."
+      "Ja, de link is bedoeld voor Nederland. Controleer op Tesla.nl en in de checkout of het referral voordeel zichtbaar is voor uw bestelling."
   },
   {
-    question: "Werkt dit in België of andere Europese landen?",
+    question: "Werkt dit ook in België of andere Europese landen?",
     answer:
-      "Tesla referral-programma’s kunnen per land verschillen. Open de link, ga naar de juiste Tesla-site voor uw land en controleer of de benefit tijdens het bestellen zichtbaar is."
+      "Tesla referral-programma's kunnen per land verschillen. Open de link, ga naar de juiste Tesla-landpagina en controleer of de benefit zichtbaar is tijdens het bestellen."
   },
   {
-    question: "Is deze website officieel van Tesla?",
+    question: "Is TeslaKortingscode.com officieel van Tesla?",
     answer:
-      "Nee. Deze website is onafhankelijk eigendom en is niet gelieerd aan, goedgekeurd door of gesponsord door Tesla, Inc."
+      "Nee. Deze website is onafhankelijk en niet gelieerd aan, goedgekeurd door of gesponsord door Tesla, Inc."
   },
   {
-    question: "Waar vind ik de officiële voorwaarden?",
-    answer: `De officiële Tesla referral voorwaarden staan op ${termsUrl}. Lees die pagina altijd voordat u bestelt.`
+    question: "Waar vind ik de officiële Tesla referral voorwaarden?",
+    answer: `De officiële voorwaarden staan op ${termsUrl}. Lees deze altijd vóór uw bestelling.`
   }
 ];
 
 export const referralActions = [
   {
     icon: Link2,
-    title: "Tesla deal-link",
-    text: "Open de beveiligde Tesla-link en controleer de zichtbare buyer benefit in de checkout."
+    title: "Gratis referral link",
+    text: "Open de Tesla deal-link — het kost u niets extra. Controleer de zichtbare benefit in de officiële checkout."
   },
   {
     icon: Zap,
     title: "Mogelijk voordeel",
-    text: "2.000 gratis Supercharging kilometers of €500 voordeel, afhankelijk van Tesla’s actuele voorwaarden."
+    text: "2.000 gratis Supercharging kilometers of €500 korting, afhankelijk van Tesla's actuele programma."
   },
   {
     icon: Car,
-    title: "Bestelroute",
-    text: "Open de link vóór uw order en controleer het voordeel op Tesla’s checkoutpagina."
+    title: "Zo werkt het",
+    text: "Open de link vóór uw bestelling en controleer het voordeel op Tesla's checkoutpagina. Dat is alles."
   }
 ];
