@@ -14,10 +14,10 @@ import { termsUrl } from "@/lib/site";
 
 export const navItems = [
   { href: "#hoe-het-werkt", label: "Hoe het werkt" },
-  { href: "#voordeel", label: "Voordeel" },
-  { href: "#modellen", label: "Modellen" },
+  { href: "/tesla-kortingscode", label: "Kortingscode" },
+  { href: "/gratis-supercharging", label: "Supercharging" },
   { href: "/blog", label: "Blog" },
-  { href: "#faq", label: "FAQ" }
+  { href: "/veelgestelde-vragen", label: "FAQ" }
 ];
 
 export const heroCopy = {
