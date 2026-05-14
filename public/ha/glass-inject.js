@@ -34,6 +34,22 @@
       --sidebar-selected-text-color: rgba(132,195,255,.96);
     }
 
+    body,
+    home-assistant,
+    home-assistant-main,
+    ha-panel-lovelace,
+    hui-root,
+    hui-view,
+    hui-sections-view,
+    .ha-scrollbar {
+      background:
+        radial-gradient(circle at 18% 16%, rgba(44,122,172,.64), transparent 36%),
+        radial-gradient(circle at 82% 15%, rgba(124,55,190,.66), transparent 34%),
+        radial-gradient(circle at 26% 80%, rgba(24,104,154,.54), transparent 36%),
+        linear-gradient(135deg, #030615 0%, #13082f 48%, #030512 100%) !important;
+      background-attachment: fixed !important;
+    }
+
     ha-card {
       background: rgba(12,12,30,.48) !important;
       border: 1px solid rgba(255,255,255,.12) !important;
