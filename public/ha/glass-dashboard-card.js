@@ -19,7 +19,7 @@ class GlassDashboardCard extends HTMLElement {
         "light.rgbic_tv_backlight",
         "light.tv_left",
         "light.tv_right",
-        "light.marylin",           // moved here from bedroom
+        "light.marylin",
       ],
       bedroomLights: ["light.bed", "switch.night_light", "light.kast", "light.closet"],
       gameLights: ["light.plafond", "light.desk_lamp", "light.desk_led_strip", "light.battletron_smart_desk_light_strip", "light.battletron_smart_desk_light_strip_2"],
@@ -48,7 +48,7 @@ class GlassDashboardCard extends HTMLElement {
       tv: "media_player.lg_webos_tv_oled65c54la_2",
       toonDevices: ["light.pet_feeder_indicator_light", "switch.pet_feeder_motion_alarm", "switch.pet_feeder_motion_recording", "switch.pet_feeder_time_watermark"],
       toonSensors: ["sensor.poopas_poops_cat_weight", "sensor.poopas_poops_excretion_duration", "sensor.poopas_poops_excretion_times_day"],
-      petFeederCamera: "camera.pet_feeder",   // VERIFY: check entity ID in Settings → Entities
+      petFeederCamera: "camera.pet_feeder",
     };
   }
 
@@ -133,7 +133,7 @@ class GlassDashboardCard extends HTMLElement {
       this._forecastLoaded = true;
       this.render();
     } catch {
-      this._forecastLoaded = false;   // allow retry on next hass update
+      this._forecastLoaded = false;
     } finally {
       this._forecastLoading = false;
     }
@@ -147,6 +147,13 @@ class GlassDashboardCard extends HTMLElement {
       "clear-night": "mdi:weather-night", fog: "mdi:weather-fog", snowy: "mdi:weather-snowy",
     };
     return icons[state] || "mdi:weather-partly-cloudy";
+  }
+
+  fmtTime(secs) {
+    if (!secs || secs < 0) return "0:00";
+    const s = Math.round(secs);
+    const m = Math.floor(s / 60);
+    return `${m}:${String(s % 60).padStart(2, "0")}`;
   }
 
   updateClock() {
@@ -184,12 +191,25 @@ class GlassDashboardCard extends HTMLElement {
     const weatherTemp     = this.attr(e.weather, "temperature", "11.6");
     const weatherHumidity = this.attr(e.weather, "humidity", "--");
     const weatherWind     = this.attr(e.weather, "wind_speed", "--");
-    const spotifyTitle  = this.attr(e.spotify, "media_title", "Spotify");
-    const spotifyArtist = this.attr(e.spotify, "media_artist", "Nothing playing");
-    const spotifyState  = this.niceState(e.spotify, "Idle");
-    const speakerState  = this.niceState(e.spotifySpeaker, "Idle");
-    const volumePct     = Math.round(Number(this.attr(e.spotifySpeaker, "volume_level", 0) || 0) * 100);
-    const tvState       = this.niceState(e.tv, "Off");
+
+    // Spotify
+    const spotifyTitle   = this.attr(e.spotify, "media_title", "");
+    const spotifyArtist  = this.attr(e.spotify, "media_artist", "");
+    const spotifyAlbum   = this.attr(e.spotify, "media_album_name", "");
+    const spotifyPic     = this.attr(e.spotify, "entity_picture", "");
+    const spotifyState   = this.st(e.spotify, "idle");
+    const spotifyPlaying = spotifyState === "playing";
+    const spotifyPaused  = spotifyState === "paused";
+    const spotifyActive  = spotifyPlaying || spotifyPaused;
+    const durSec         = Number(this.attr(e.spotify, "media_duration", 0)) || 0;
+    const posSec         = Number(this.attr(e.spotify, "media_position", 0)) || 0;
+    const posUpdatedAt   = this.attr(e.spotify, "media_position_updated_at", null);
+    const elapsed        = posUpdatedAt && spotifyPlaying ? (Date.now() - new Date(posUpdatedAt).getTime()) / 1000 : 0;
+    const currentPos     = Math.min(posSec + elapsed, durSec);
+    const spProgress     = durSec > 0 ? Math.min((currentPos / durSec) * 100, 100) : 0;
+    const volumePct      = Math.round(Number(this.attr(e.spotifySpeaker, "volume_level", 0) || 0) * 100);
+    const tvState        = this.niceState(e.tv, "Off");
+    const speakerState   = this.niceState(e.spotifySpeaker, "Idle");
 
     this.shadowRoot.innerHTML = `
 <style>${this.css()}</style>
@@ -284,22 +304,31 @@ class GlassDashboardCard extends HTMLElement {
           </div>
         </section>
 
-        <section class="gl sp">
-          <div class="sp-ico"><ha-icon icon="mdi:spotify"></ha-icon></div>
-          <div class="sp-info">
-            <div class="sp-head">
-              <div class="sp-t">${spotifyTitle}</div>
-              <div class="sp-pill">${spotifyState}</div>
+        <!-- Spotify Player -->
+        <section class="gl sp2">
+          ${spotifyPic
+            ? `<img class="sp-art" src="${spotifyPic}" alt="album art">`
+            : `<div class="sp-art sp-art-empty"><ha-icon icon="mdi:spotify"></ha-icon></div>`}
+          <div class="sp-body">
+            <div class="sp-track">${spotifyTitle || (spotifyActive ? "Playing" : "Spotify")}</div>
+            <div class="sp-artist">${spotifyArtist || (spotifyActive ? "Unknown artist" : "Nothing playing")}</div>
+            ${spotifyAlbum ? `<div class="sp-album">${spotifyAlbum}</div>` : ""}
+            <div class="sp-prog-wrap">
+              <div class="sp-prog-bar"><div class="sp-prog-fill" style="width:${spProgress}%"></div></div>
+              <div class="sp-times"><span>${this.fmtTime(currentPos)}</span><span>${this.fmtTime(durSec)}</span></div>
             </div>
-            <div class="sp-a">${spotifyArtist}</div>
-            <div class="sp-meta">
-              <span>Dining Room speaker · ${speakerState}</span>
-              <span>${volumePct}%</span>
+            <div class="sp-ctrl-row">
+              <button class="sp-btn" data-sp="prev"><ha-icon icon="mdi:skip-previous"></ha-icon></button>
+              <button class="sp-btn sp-play" data-sp="play-pause">
+                <ha-icon icon="mdi:${spotifyPlaying ? "pause" : "play"}"></ha-icon>
+              </button>
+              <button class="sp-btn" data-sp="next"><ha-icon icon="mdi:skip-next"></ha-icon></button>
+              <div class="sp-vol-group">
+                <button class="sp-btn sp-sm" data-sp="vol-down"><ha-icon icon="mdi:volume-minus"></ha-icon></button>
+                <span class="sp-vol-lbl">${volumePct}%</span>
+                <button class="sp-btn sp-sm" data-sp="vol-up"><ha-icon icon="mdi:volume-plus"></ha-icon></button>
+              </div>
             </div>
-            <div class="sp-progress"><div style="width:${Math.max(2, volumePct)}%"></div></div>
-          </div>
-          <div class="bars ${this.isOn(e.spotify) || this.isOn(e.spotifySpeaker) ? "" : "idle"}">
-            <div class="bar"></div><div class="bar"></div><div class="bar"></div>
           </div>
         </section>
 
@@ -310,7 +339,7 @@ class GlassDashboardCard extends HTMLElement {
           </div>
           <div class="media-item">
             <ha-icon icon="mdi:speaker"></ha-icon>
-            <div><b>Dining Room</b><span>${speakerState} · ${volumePct}%</span></div>
+            <div><b>Dining Room</b><span>${speakerState}</span></div>
           </div>
         </section>
       </div>
@@ -344,11 +373,27 @@ class GlassDashboardCard extends HTMLElement {
       btn.addEventListener("click", () => this.toggleEntity(btn.dataset.entity));
     });
     this.shadowRoot.querySelector("[data-action='all-off']")?.addEventListener("click", () => this.turnOffAll());
+    // Tesla
     this.shadowRoot.querySelector("[data-tesla='climate']")?.addEventListener("click", () => this.toggleClimate());
     this.shadowRoot.querySelector("[data-tesla='defrost']")?.addEventListener("click",  () => this.toggleEntity(this.entities.teslaDefrost));
     this.shadowRoot.querySelector("[data-tesla='sentry']")?.addEventListener("click",   () => this.toggleEntity(this.entities.teslaSentry));
     this.shadowRoot.querySelector("[data-tesla='charge']")?.addEventListener("click",   () => this.toggleEntity(this.entities.teslaCharge));
     this.shadowRoot.querySelector("[data-tesla='wake']")?.addEventListener("click",     () => this.service("button", "press", { entity_id: "button.model_3_wake" }));
+    // Spotify
+    const sp = this.entities.spotify;
+    const spk = this.entities.spotifySpeaker;
+    this.shadowRoot.querySelector("[data-sp='play-pause']")?.addEventListener("click", () => this.service("media_player", "media_play_pause", { entity_id: sp }));
+    this.shadowRoot.querySelector("[data-sp='prev']")?.addEventListener("click",       () => this.service("media_player", "media_previous_track", { entity_id: sp }));
+    this.shadowRoot.querySelector("[data-sp='next']")?.addEventListener("click",       () => this.service("media_player", "media_next_track", { entity_id: sp }));
+    this.shadowRoot.querySelector("[data-sp='vol-up']")?.addEventListener("click", () => {
+      const cur = Number(this.attr(spk, "volume_level", 0)) || 0;
+      this.service("media_player", "volume_set", { entity_id: spk, volume_level: Math.min(1, cur + 0.05) });
+    });
+    this.shadowRoot.querySelector("[data-sp='vol-down']")?.addEventListener("click", () => {
+      const cur = Number(this.attr(spk, "volume_level", 0)) || 0;
+      this.service("media_player", "volume_set", { entity_id: spk, volume_level: Math.max(0, cur - 0.05) });
+    });
+    // Camera refresh
     this.shadowRoot.querySelector("[data-action='cam-refresh']")?.addEventListener("click", () => {
       const img = this.shadowRoot.querySelector(".cam-feed");
       if (img) img.src = img.src.replace(/\?t=\d+/, "") + "?t=" + Date.now();
@@ -559,204 +604,213 @@ button{font:inherit;color:inherit;border:0;text-align:inherit}
 /* ── Glass atoms ─────────────────────────────────────────────────────────────*/
 .gl{background:rgba(255,255,255,.07);border:1px solid rgba(255,255,255,.13);backdrop-filter:blur(24px);-webkit-backdrop-filter:blur(24px);border-radius:14px}
 .glsm{background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.08);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);border-radius:10px}
-.slbl{font-size:8px;font-weight:700;color:rgba(255,255,255,.38);letter-spacing:1.1px;text-transform:uppercase;margin-bottom:7px}
-.block{padding:10px}
+.slbl{font-size:8px;font-weight:700;color:rgba(255,255,255,.38);letter-spacing:1.1px;text-transform:uppercase;margin-bottom:6px}
+.block{padding:8px}
 
 /* ── Topbar ──────────────────────────────────────────────────────────────────*/
-.topbar{display:flex;align-items:center;justify-content:space-between;padding:11px 16px 7px}
+.topbar{display:flex;align-items:center;justify-content:space-between;padding:8px 14px 5px}
 .home-lbl{font-size:10px;font-weight:700;color:rgba(255,255,255,.55);letter-spacing:1.4px;text-transform:uppercase}
 .home-sub{font-size:8.5px;color:rgba(255,255,255,.32);margin-top:1px}
 .clock-wrap{text-align:right}
-.clk-time{font-size:20px;font-weight:200;color:rgba(255,255,255,.92);letter-spacing:-1px;line-height:1}
-.clk-date{font-size:10px;color:rgba(255,255,255,.5);margin-top:2px}
+.clk-time{font-size:18px;font-weight:200;color:rgba(255,255,255,.92);letter-spacing:-1px;line-height:1}
+.clk-date{font-size:9.5px;color:rgba(255,255,255,.5);margin-top:1px}
 
 /* ── Tabs ────────────────────────────────────────────────────────────────────*/
-.tabs{display:flex;gap:3px;padding:0 12px 8px;overflow-x:auto;scrollbar-width:none}
+.tabs{display:flex;gap:3px;padding:0 10px 6px;overflow-x:auto;scrollbar-width:none}
 .tabs::-webkit-scrollbar{display:none}
-.tab{flex-shrink:0;display:flex;align-items:center;gap:5px;padding:6px 11px;border-radius:20px;font-size:10.5px;font-weight:700;color:rgba(255,255,255,.48);cursor:pointer;border:1px solid rgba(255,255,255,.06);background:rgba(255,255,255,.05);transition:all .18s;white-space:nowrap}
-.tab ha-icon{--mdc-icon-size:13px;opacity:.7}
+.tab{flex-shrink:0;display:flex;align-items:center;gap:5px;padding:5px 9px;border-radius:20px;font-size:10px;font-weight:700;color:rgba(255,255,255,.48);cursor:pointer;border:1px solid rgba(255,255,255,.06);background:rgba(255,255,255,.05);transition:all .18s;white-space:nowrap}
+.tab ha-icon{--mdc-icon-size:12px;opacity:.7}
 .tab:hover{color:rgba(255,255,255,.70);background:rgba(255,255,255,.09);border-color:rgba(255,255,255,.11)}
 .tab.active{background:rgba(255,255,255,.15);border-color:rgba(255,255,255,.28);color:rgba(255,255,255,.96)}
 .tab.active ha-icon{opacity:1}
-.divider{height:1px;background:rgba(255,255,255,.07);margin:0 12px}
+.divider{height:1px;background:rgba(255,255,255,.07);margin:0 10px}
 
 /* ── Page / grid ─────────────────────────────────────────────────────────────*/
-.page{display:none;flex:1;padding:9px 11px 11px}
+.page{display:none;flex:1;padding:7px 9px 9px}
 .page.active{display:flex}
-.g2{display:grid;grid-template-columns:1fr 1fr;gap:9px;width:100%}
-.col{display:flex;flex-direction:column;gap:8px;min-width:0}
+.g2{display:grid;grid-template-columns:1fr 1fr;gap:7px;width:100%}
+.col{display:flex;flex-direction:column;gap:6px;min-width:0}
 
 /* ── Room buttons ────────────────────────────────────────────────────────────*/
-.rooms5{display:grid;grid-template-columns:repeat(5,1fr);gap:5px}
-.room{padding:9px 5px 8px;cursor:pointer;transition:all .18s;position:relative;border-radius:12px;text-align:center}
+.rooms5{display:grid;grid-template-columns:repeat(5,1fr);gap:4px}
+.room{padding:8px 4px 7px;cursor:pointer;transition:all .18s;position:relative;border-radius:12px;text-align:center}
 .room:hover{background:rgba(255,255,255,.09)}
 .room.on{background:rgba(255,255,255,.11);border-color:rgba(200,180,255,.2)}
-.ri{--mdc-icon-size:16px;color:rgba(255,255,255,.42);margin:0 auto 4px;transition:color .18s;display:block}
+.ri{--mdc-icon-size:15px;color:rgba(255,255,255,.42);margin:0 auto 3px;transition:color .18s;display:block}
 .room.on .ri{color:rgba(225,215,255,.98)}
-.rn{font-size:8.5px;font-weight:700;color:rgba(255,255,255,.52);line-height:1.25}
+.rn{font-size:8px;font-weight:700;color:rgba(255,255,255,.52);line-height:1.25}
 .room.on .rn{color:rgba(255,255,255,.94)}
-.rdot{position:absolute;top:6px;right:6px;width:4px;height:4px;border-radius:50%;background:rgba(255,255,255,.1)}
+.rdot{position:absolute;top:5px;right:5px;width:4px;height:4px;border-radius:50%;background:rgba(255,255,255,.1)}
 .room.on .rdot{background:#a78bfa}
 .alloff .rdot{background:rgba(248,113,113,.35)}
 .alloff .ri{color:rgba(248,113,113,.55)}
 
 /* ── Climate summary ─────────────────────────────────────────────────────────*/
-.clim3{display:grid;grid-template-columns:repeat(3,1fr);gap:5px}
-.ci{text-align:center;padding:8px 4px}
-.cv{font-size:16px;font-weight:300;color:rgba(255,255,255,.96);letter-spacing:-1px;line-height:1}
-.cu{font-size:8.5px;color:rgba(255,255,255,.52)}
-.cl{font-size:7px;color:rgba(255,255,255,.42);margin-top:3px;text-transform:uppercase;letter-spacing:.5px}
-.cgood{font-size:11px;font-weight:700;color:#7fffd4;padding-top:2px;text-transform:capitalize}
+.clim3{display:grid;grid-template-columns:repeat(3,1fr);gap:4px}
+.ci{text-align:center;padding:7px 4px}
+.cv{font-size:15px;font-weight:300;color:rgba(255,255,255,.96);letter-spacing:-1px;line-height:1}
+.cu{font-size:8px;color:rgba(255,255,255,.52)}
+.cl{font-size:7px;color:rgba(255,255,255,.42);margin-top:2px;text-transform:uppercase;letter-spacing:.5px}
+.cgood{font-size:10px;font-weight:700;color:#7fffd4;padding-top:2px;text-transform:capitalize}
 
 /* ── Tesla card ──────────────────────────────────────────────────────────────*/
 .tesla-card{overflow:hidden}
 .car-area{
-  width:100%;height:138px;position:relative;overflow:hidden;
+  width:100%;height:110px;position:relative;overflow:hidden;
   background:radial-gradient(ellipse 90% 70% at 50% 60%,rgba(25,25,55,.95) 0%,rgba(8,8,25,.98) 100%);
   border-radius:12px 12px 0 0;
   display:flex;align-items:center;justify-content:center;
 }
-.car-glow{position:absolute;bottom:0;left:0;right:0;height:40px;background:radial-gradient(ellipse 80% 100% at 50% 100%,rgba(80,100,220,.18) 0%,transparent 70%)}
+.car-glow{position:absolute;bottom:0;left:0;right:0;height:35px;background:radial-gradient(ellipse 80% 100% at 50% 100%,rgba(80,100,220,.18) 0%,transparent 70%)}
 .car-img{
   width:100%;height:100%;
   object-fit:contain;
   object-position:center 60%;
-  filter:drop-shadow(0 12px 18px rgba(0,0,0,.5));
+  filter:drop-shadow(0 10px 16px rgba(0,0,0,.5));
   user-select:none;pointer-events:none;
   position:relative;z-index:1;
 }
-.tesla-stats{padding:8px 11px 10px}
-.tesla-hdr{display:flex;justify-content:space-between;align-items:center;margin-bottom:6px}
-.tesla-name{font-size:13px;font-weight:700;color:rgba(255,255,255,.9)}
-.tesla-sub{font-size:8px;color:rgba(255,255,255,.44);margin-top:2px}
+.tesla-stats{padding:7px 10px 8px}
+.tesla-hdr{display:flex;justify-content:space-between;align-items:center;margin-bottom:5px}
+.tesla-name{font-size:12px;font-weight:700;color:rgba(255,255,255,.9)}
+.tesla-sub{font-size:7.5px;color:rgba(255,255,255,.44);margin-top:1px}
 .tag{font-size:8px;color:rgba(255,255,255,.6);background:rgba(255,255,255,.1);padding:3px 7px;border-radius:9px;border:1px solid rgba(255,255,255,.13);text-transform:capitalize}
-.batt-row{display:flex;align-items:baseline;justify-content:space-between;margin-bottom:5px}
-.bpct{font-size:24px;font-weight:300;color:#fff;letter-spacing:-1.5px}
-.bpct span{font-size:12px;color:rgba(255,255,255,.5)}
-.bkm{font-size:11px;font-weight:600;color:rgba(255,255,255,.62)}
-.bbar{height:3px;background:rgba(255,255,255,.14);border-radius:2px;margin-bottom:9px}
+.batt-row{display:flex;align-items:baseline;justify-content:space-between;margin-bottom:4px}
+.bpct{font-size:22px;font-weight:300;color:#fff;letter-spacing:-1.5px}
+.bpct span{font-size:11px;color:rgba(255,255,255,.5)}
+.bkm{font-size:10px;font-weight:600;color:rgba(255,255,255,.62)}
+.bbar{height:3px;background:rgba(255,255,255,.14);border-radius:2px;margin-bottom:7px}
 .bfill{height:100%;border-radius:2px;background:linear-gradient(90deg,#34d399,#86efac)}
 .tbtns{display:grid;grid-template-columns:repeat(5,1fr);gap:4px}
-.tb{padding:7px 3px;text-align:center;cursor:pointer;transition:all .18s;border-radius:8px;border:1px solid rgba(255,255,255,.1);background:rgba(255,255,255,.06)}
+.tb{padding:6px 3px;text-align:center;cursor:pointer;transition:all .18s;border-radius:8px;border:1px solid rgba(255,255,255,.1);background:rgba(255,255,255,.06)}
 .tb:hover{background:rgba(255,255,255,.09)}
 .tb.on{background:rgba(167,139,250,.15);border-color:rgba(167,139,250,.28)}
-.tb ha-icon{display:block;--mdc-icon-size:14px;color:rgba(255,255,255,.5);margin:0 auto 2px}
+.tb ha-icon{display:block;--mdc-icon-size:13px;color:rgba(255,255,255,.5);margin:0 auto 2px}
 .tb.on ha-icon{color:#c4b5fd}
 .tb span{font-size:7px;color:rgba(255,255,255,.44);text-transform:uppercase;letter-spacing:.3px;font-weight:700}
 
 /* ── Weather ─────────────────────────────────────────────────────────────────*/
-.wx-main{display:flex;align-items:center;gap:9px;margin-bottom:8px}
-.wx-ico{--mdc-icon-size:22px;color:rgba(255,255,255,.62)}
-.wx-tmp{font-size:20px;font-weight:300;color:rgba(255,255,255,.94);letter-spacing:-1px}
-.wx-tmp span{font-size:11px;color:rgba(255,255,255,.5)}
-.wx-cond{font-size:8px;color:rgba(255,255,255,.52);margin-top:2px;text-transform:uppercase;letter-spacing:.5px}
+.wx-main{display:flex;align-items:center;gap:8px;margin-bottom:7px}
+.wx-ico{--mdc-icon-size:20px;color:rgba(255,255,255,.62)}
+.wx-tmp{font-size:18px;font-weight:300;color:rgba(255,255,255,.94);letter-spacing:-1px}
+.wx-tmp span{font-size:10px;color:rgba(255,255,255,.5)}
+.wx-cond{font-size:7.5px;color:rgba(255,255,255,.52);margin-top:1px;text-transform:uppercase;letter-spacing:.5px}
 .wx-days{display:grid;grid-template-columns:repeat(3,1fr);gap:4px}
-.wxd{text-align:center;padding:6px 3px}
-.wxdn{font-size:7px;color:rgba(255,255,255,.46);text-transform:uppercase;letter-spacing:.4px;margin-bottom:3px}
-.wxdi{--mdc-icon-size:13px;color:rgba(255,255,255,.58);margin-bottom:2px}
+.wxd{text-align:center;padding:5px 3px}
+.wxdn{font-size:7px;color:rgba(255,255,255,.46);text-transform:uppercase;letter-spacing:.4px;margin-bottom:2px}
+.wxdi{--mdc-icon-size:12px;color:rgba(255,255,255,.58);margin-bottom:2px}
 .wxdh{font-size:10px;color:rgba(255,255,255,.76)}
 .wxdl{font-size:8px;color:rgba(255,255,255,.42);margin-top:1px}
 
-/* ── Spotify ─────────────────────────────────────────────────────────────────*/
-.sp{padding:10px 11px;display:flex;align-items:center;gap:10px}
-.sp-ico{width:38px;height:38px;border-radius:50%;background:linear-gradient(145deg,rgba(29,185,84,.3),rgba(29,185,84,.08));border:1px solid rgba(29,185,84,.38);display:flex;align-items:center;justify-content:center;flex-shrink:0}
-.sp-ico ha-icon{--mdc-icon-size:20px;color:#1DB954}
-.sp-info{min-width:0;flex:1}
-.sp-head{display:flex;align-items:center;gap:7px;min-width:0}
-.sp-t{font-size:13px;font-weight:800;color:rgba(255,255,255,.9);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.sp-pill{font-size:7.5px;color:rgba(255,255,255,.7);padding:2px 6px;border-radius:999px;background:rgba(255,255,255,.1);text-transform:uppercase;letter-spacing:.5px;white-space:nowrap}
-.sp-a{font-size:9.5px;color:rgba(255,255,255,.56);margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.sp-meta{display:flex;justify-content:space-between;margin-top:7px;font-size:8.5px;color:rgba(255,255,255,.54)}
-.sp-progress{height:3px;border-radius:3px;background:rgba(255,255,255,.14);margin-top:5px;overflow:hidden}
-.sp-progress div{height:100%;border-radius:3px;background:#1DB954}
-.bars{display:flex;gap:2px;align-items:flex-end;height:10px;flex-shrink:0}
-.bar{width:2px;border-radius:1px;background:#1DB954;animation:eq .9s ease-in-out infinite alternate}
-.bar:nth-child(2){animation-delay:.3s}
-.bar:nth-child(3){animation-delay:.6s}
-@keyframes eq{from{height:3px}to{height:9px}}
-.bars.idle .bar{animation:none;height:4px;background:rgba(255,255,255,.3)}
-.media-strip{padding:9px 11px;display:grid;grid-template-columns:1fr 1fr;gap:7px}
-.media-item{display:flex;align-items:center;gap:7px;min-width:0}
-.media-item ha-icon{--mdc-icon-size:17px;color:rgba(255,255,255,.68)}
-.media-item b{display:block;font-size:9.5px;color:rgba(255,255,255,.86);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.media-item span{display:block;font-size:8px;color:rgba(255,255,255,.52);margin-top:1px}
+/* ── Spotify Player ─────────────────────────────────────────────────────────*/
+.sp2{padding:9px 10px;display:flex;gap:10px;align-items:flex-start}
+.sp-art{width:74px;height:74px;border-radius:8px;object-fit:cover;flex-shrink:0;border:1px solid rgba(255,255,255,.12)}
+.sp-art-empty{width:74px;height:74px;border-radius:8px;flex-shrink:0;background:linear-gradient(145deg,rgba(29,185,84,.25),rgba(29,185,84,.06));border:1px solid rgba(29,185,84,.3);display:flex;align-items:center;justify-content:center}
+.sp-art-empty ha-icon{--mdc-icon-size:32px;color:#1DB954}
+.sp-body{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px}
+.sp-track{font-size:12px;font-weight:800;color:rgba(255,255,255,.92);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;line-height:1.2}
+.sp-artist{font-size:9px;color:rgba(255,255,255,.55);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.sp-album{font-size:8px;color:rgba(255,255,255,.35);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-bottom:1px}
+.sp-prog-wrap{margin-top:4px}
+.sp-prog-bar{height:3px;border-radius:3px;background:rgba(255,255,255,.14);overflow:hidden;cursor:default}
+.sp-prog-fill{height:100%;border-radius:3px;background:#1DB954;transition:width .5s linear}
+.sp-times{display:flex;justify-content:space-between;font-size:7.5px;color:rgba(255,255,255,.35);margin-top:2px}
+.sp-ctrl-row{display:flex;align-items:center;gap:4px;margin-top:4px}
+.sp-btn{background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.1);border-radius:7px;padding:4px 7px;cursor:pointer;display:flex;align-items:center;justify-content:center;transition:all .15s;color:rgba(255,255,255,.7)}
+.sp-btn:hover{background:rgba(255,255,255,.14);color:#fff}
+.sp-btn ha-icon{--mdc-icon-size:14px}
+.sp-play{background:rgba(29,185,84,.2);border-color:rgba(29,185,84,.35);color:#1DB954;padding:5px 9px}
+.sp-play:hover{background:rgba(29,185,84,.3);color:#1DB954}
+.sp-play ha-icon{--mdc-icon-size:15px}
+.sp-sm ha-icon{--mdc-icon-size:11px}
+.sp-vol-group{display:flex;align-items:center;gap:2px;margin-left:auto}
+.sp-vol-lbl{font-size:8px;color:rgba(255,255,255,.45);min-width:24px;text-align:center}
+
+/* ── Media strip ─────────────────────────────────────────────────────────────*/
+.media-strip{padding:7px 10px;display:grid;grid-template-columns:1fr 1fr;gap:6px}
+.media-item{display:flex;align-items:center;gap:6px;min-width:0}
+.media-item ha-icon{--mdc-icon-size:16px;color:rgba(255,255,255,.68)}
+.media-item b{display:block;font-size:9px;color:rgba(255,255,255,.86);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.media-item span{display:block;font-size:7.5px;color:rgba(255,255,255,.52);margin-top:1px}
 
 /* ── Room pages ──────────────────────────────────────────────────────────────*/
-.rp-hero{padding:13px}
-.rp-title{font-size:18px;font-weight:200;color:rgba(255,255,255,.85);margin-bottom:2px;letter-spacing:-.5px}
-.rp-sub{font-size:9px;color:rgba(255,255,255,.25)}
-.big-toggle{width:100%;display:flex;align-items:center;justify-content:space-between;margin-top:11px;padding:10px 12px;border-radius:11px;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.09);cursor:pointer;transition:all .18s}
+.rp-hero{padding:10px}
+.rp-title{font-size:16px;font-weight:200;color:rgba(255,255,255,.85);margin-bottom:1px;letter-spacing:-.5px}
+.rp-sub{font-size:8.5px;color:rgba(255,255,255,.25)}
+.big-toggle{width:100%;display:flex;align-items:center;justify-content:space-between;margin-top:8px;padding:9px 11px;border-radius:11px;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.09);cursor:pointer;transition:all .18s}
 .big-toggle:hover{background:rgba(255,255,255,.09)}
 .big-toggle.on{background:rgba(167,139,250,.13);border-color:rgba(167,139,250,.24)}
-.bt-label{font-size:10.5px;font-weight:600;color:rgba(255,255,255,.48)}
+.bt-label{font-size:10px;font-weight:600;color:rgba(255,255,255,.48)}
 .big-toggle.on .bt-label{color:rgba(200,185,255,.85)}
-.sw{width:34px;height:18px;border-radius:9px;background:rgba(255,255,255,.12);position:relative;transition:background .2s}
-.sw::after{content:"";position:absolute;top:3px;left:3px;width:12px;height:12px;border-radius:50%;background:rgba(255,255,255,.45);transition:all .2s}
+.sw{width:32px;height:17px;border-radius:9px;background:rgba(255,255,255,.12);position:relative;transition:background .2s}
+.sw::after{content:"";position:absolute;top:3px;left:3px;width:11px;height:11px;border-radius:50%;background:rgba(255,255,255,.45);transition:all .2s}
 .big-toggle.on .sw{background:#7c3aed}
-.big-toggle.on .sw::after{left:19px;background:#fff}
+.big-toggle.on .sw::after{left:18px;background:#fff}
 
 /* ── Light list ──────────────────────────────────────────────────────────────*/
-.light-list{display:flex;flex-direction:column;gap:5px}
-.light-item{width:100%;display:flex;align-items:center;justify-content:space-between;padding:8px 10px;border-radius:10px;cursor:pointer;border:1px solid rgba(255,255,255,.1);background:rgba(255,255,255,.06);transition:all .18s}
+.light-list{display:flex;flex-direction:column;gap:4px}
+.light-item{width:100%;display:flex;align-items:center;justify-content:space-between;padding:6px 9px;border-radius:9px;cursor:pointer;border:1px solid rgba(255,255,255,.1);background:rgba(255,255,255,.06);transition:all .18s}
 .light-item:hover{background:rgba(255,255,255,.09)}
 .light-item.on{background:rgba(167,139,250,.14);border-color:rgba(167,139,250,.3)}
-.li-left{display:flex;align-items:center;gap:8px;min-width:0}
-.li-ico{--mdc-icon-size:14px;color:rgba(255,255,255,.5)}
+.li-left{display:flex;align-items:center;gap:7px;min-width:0}
+.li-ico{--mdc-icon-size:13px;color:rgba(255,255,255,.5)}
 .light-item.on .li-ico{color:rgba(230,220,255,.94)}
-.li-name{font-size:10px;font-weight:700;color:rgba(255,255,255,.7);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:240px}
+.li-name{font-size:9.5px;font-weight:700;color:rgba(255,255,255,.7);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:220px}
 .light-item.on .li-name{color:rgba(255,255,255,.94)}
-.li-sub{font-size:7.5px;color:rgba(255,255,255,.4);margin-top:1px}
-.lisw{width:28px;height:15px;border-radius:8px;background:rgba(255,255,255,.1);position:relative;flex-shrink:0}
-.lisw::after{content:"";position:absolute;top:2px;left:2px;width:11px;height:11px;border-radius:50%;background:rgba(255,255,255,.35);transition:all .2s}
+.li-sub{font-size:7px;color:rgba(255,255,255,.4);margin-top:1px}
+.lisw{width:26px;height:14px;border-radius:7px;background:rgba(255,255,255,.1);position:relative;flex-shrink:0}
+.lisw::after{content:"";position:absolute;top:2px;left:2px;width:10px;height:10px;border-radius:50%;background:rgba(255,255,255,.35);transition:all .2s}
 .light-item.on .lisw{background:#7c3aed}
-.light-item.on .lisw::after{left:15px;background:#fff}
+.light-item.on .lisw::after{left:14px;background:#fff}
 
 /* ── Climate detail ──────────────────────────────────────────────────────────*/
-.clim-detail{display:grid;grid-template-columns:1fr 1fr;gap:6px}
-.cd{padding:10px;text-align:center}
-.cd-val{font-size:20px;font-weight:200;color:rgba(255,255,255,.85);letter-spacing:-1px;line-height:1}
+.clim-detail{display:grid;grid-template-columns:1fr 1fr;gap:5px}
+.cd{padding:8px;text-align:center}
+.cd-val{font-size:18px;font-weight:200;color:rgba(255,255,255,.85);letter-spacing:-1px;line-height:1}
 .cd-unit{font-size:9px;color:rgba(255,255,255,.28)}
-.cd-lbl{font-size:7px;color:rgba(255,255,255,.24);margin-top:3px;text-transform:uppercase;letter-spacing:.6px}
-.cd-full{grid-column:span 2;padding:9px 11px;display:flex;align-items:center;justify-content:space-between;color:rgba(255,255,255,.38);font-size:9.5px}
-.cd-aq-val{font-size:12px;font-weight:700;color:#6ee7b7;text-transform:capitalize}
+.cd-lbl{font-size:7px;color:rgba(255,255,255,.24);margin-top:2px;text-transform:uppercase;letter-spacing:.6px}
+.cd-full{grid-column:span 2;padding:7px 10px;display:flex;align-items:center;justify-content:space-between;color:rgba(255,255,255,.38);font-size:9px}
+.cd-aq-val{font-size:11px;font-weight:700;color:#6ee7b7;text-transform:capitalize}
 
 /* ── Scenes ──────────────────────────────────────────────────────────────────*/
-.scene-item{width:100%;display:flex;align-items:center;justify-content:space-between;padding:9px 11px;border-radius:10px;cursor:pointer;border:1px solid rgba(255,255,255,.07);background:rgba(255,255,255,.04);transition:all .18s;margin-bottom:5px}
+.scene-item{width:100%;display:flex;align-items:center;justify-content:space-between;padding:7px 10px;border-radius:9px;cursor:pointer;border:1px solid rgba(255,255,255,.07);background:rgba(255,255,255,.04);transition:all .18s;margin-bottom:4px}
 .scene-item:hover{background:rgba(255,255,255,.07)}
-.sc-left{display:flex;align-items:center;gap:8px}
-.sc-ico{--mdc-icon-size:14px;color:rgba(255,255,255,.24)}
-.sc-name{font-size:10px;font-weight:500;color:rgba(255,255,255,.42)}
-.sc-sub{font-size:7.5px;color:rgba(255,255,255,.18);margin-top:1px}
+.sc-left{display:flex;align-items:center;gap:7px}
+.sc-ico{--mdc-icon-size:13px;color:rgba(255,255,255,.24)}
+.sc-name{font-size:9.5px;font-weight:500;color:rgba(255,255,255,.42)}
+.sc-sub{font-size:7px;color:rgba(255,255,255,.18);margin-top:1px}
 .chev{--mdc-icon-size:12px;color:rgba(255,255,255,.16)}
 
 /* ── Toon's Room / Camera ────────────────────────────────────────────────────*/
-.pet-status{display:flex;align-items:center;gap:10px;margin-top:11px;padding:10px 11px;border-radius:11px;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.1)}
+.pet-status{display:flex;align-items:center;gap:9px;margin-top:8px;padding:8px 10px;border-radius:10px;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.1)}
 .pet-status.on{background:rgba(167,139,250,.13);border-color:rgba(167,139,250,.28)}
-.pet-status ha-icon{--mdc-icon-size:22px;color:rgba(255,255,255,.68)}
-.pet-status b{display:block;font-size:11px;color:rgba(255,255,255,.88)}
-.pet-status span{display:block;font-size:8.5px;color:rgba(255,255,255,.5);margin-top:2px}
+.pet-status ha-icon{--mdc-icon-size:20px;color:rgba(255,255,255,.68)}
+.pet-status b{display:block;font-size:10px;color:rgba(255,255,255,.88)}
+.pet-status span{display:block;font-size:8px;color:rgba(255,255,255,.5);margin-top:1px}
 
 .cam-section{overflow:hidden}
-.slbl-row{display:flex;align-items:center;justify-content:space-between;margin-bottom:8px}
+.slbl-row{display:flex;align-items:center;justify-content:space-between;margin-bottom:7px}
 .cam-btn{background:rgba(255,255,255,.07);border:1px solid rgba(255,255,255,.12);border-radius:7px;padding:4px 6px;cursor:pointer;display:flex;align-items:center}
 .cam-btn ha-icon{--mdc-icon-size:12px;color:rgba(255,255,255,.5)}
 .cam-btn:hover{background:rgba(255,255,255,.12)}
-.cam-wrap{border-radius:10px;overflow:hidden;background:rgba(0,0,0,.35);min-height:140px;display:flex;align-items:center;justify-content:center}
-.cam-feed{width:100%;height:auto;display:block;border-radius:10px}
-.cam-err{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;padding:24px;color:rgba(255,255,255,.3);font-size:9.5px;text-align:center;min-height:140px}
-.cam-err ha-icon{--mdc-icon-size:28px}
-.cam-err small{font-size:8px;opacity:.7;margin-top:2px}
+.cam-wrap{border-radius:9px;overflow:hidden;background:rgba(0,0,0,.35);min-height:130px;display:flex;align-items:center;justify-content:center}
+.cam-feed{width:100%;height:auto;display:block;border-radius:9px}
+.cam-err{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:7px;padding:20px;color:rgba(255,255,255,.3);font-size:9px;text-align:center;min-height:130px}
+.cam-err ha-icon{--mdc-icon-size:26px}
+.cam-err small{font-size:7.5px;opacity:.7;margin-top:1px}
 
 /* ── Responsive ──────────────────────────────────────────────────────────────*/
 @media(max-width:820px){
   .dash{min-height:calc(100vh - 80px);border-radius:0}
   .g2{grid-template-columns:1fr}
   .rooms5{grid-template-columns:repeat(3,1fr)}
-  .car-area{height:120px}
-  .page{padding:8px}
-  .tab{padding:6px 9px}
+  .car-area{height:95px}
+  .page{padding:6px}
+  .tab{padding:5px 8px}
   .weather{order:10}
   .media-strip{grid-template-columns:1fr}
+  .sp2{flex-direction:column}
+  .sp-art,.sp-art-empty{width:100%;height:100px}
 }
 `;
   }
