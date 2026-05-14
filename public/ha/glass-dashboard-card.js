@@ -22,7 +22,7 @@ class GlassDashboardCard extends HTMLElement {
       ],
       bedroomLights: ["light.bed", "light.marylin", "switch.night_light", "light.kast", "light.closet"],
       gameLights: ["light.plafond", "light.desk_lamp", "light.desk_led_strip", "light.battletron_smart_desk_light_strip", "light.battletron_smart_desk_light_strip_2"],
-      utilityLights: ["light.toilet", "light.hallway_door", "light.ants_closet", "light.watch_light"],
+      utilityLights: ["light.toilet", "light.hallway_door"],
       livingTemp: "sensor.living_room_sensor_temperature",
       livingHumidity: "sensor.living_room_sensor_humidity",
       livingAir: "sensor.living_room_sensor_air_quality",
@@ -38,11 +38,14 @@ class GlassDashboardCard extends HTMLElement {
       teslaSentry: "switch.model_3_sentry_mode",
       teslaCharge: "switch.model_3_charge",
       teslaLock: "lock.model_3_lock",
+      teslaStatus: "binary_sensor.model_3_status",
+      teslaChargePort: "cover.model_3_charge_port_door",
+      teslaFrunk: "cover.model_3_froot",
+      teslaBoot: "cover.model_3_boot",
       spotify: "media_player.spotify_tristan_pahud_de_mortanges",
       spotifySpeaker: "media_player.dining_room",
       tv: "media_player.lg_webos_tv_oled65c54la_2",
-      toonLights: ["light.pet_feeder_indicator_light"],
-      toonDevices: ["switch.pet_feeder_motion_alarm", "switch.pet_feeder_motion_recording", "switch.pet_feeder_time_watermark"],
+      toonDevices: ["light.pet_feeder_indicator_light", "switch.pet_feeder_motion_alarm", "switch.pet_feeder_motion_recording", "switch.pet_feeder_time_watermark"],
       toonSensors: ["sensor.poopas_poops_cat_weight", "sensor.poopas_poops_excretion_duration", "sensor.poopas_poops_excretion_times_day"],
     };
   }
@@ -124,7 +127,6 @@ class GlassDashboardCard extends HTMLElement {
         ...this.entities.bedroomLights,
         ...this.entities.gameLights,
         ...this.entities.utilityLights,
-        ...this.entities.toonLights,
       ],
     });
   }
@@ -176,6 +178,13 @@ class GlassDashboardCard extends HTMLElement {
     date.textContent = now.toLocaleDateString([], { weekday: "short", day: "numeric", month: "long" });
   }
 
+  greeting() {
+    const hour = new Date().getHours();
+    if (hour < 12) return "Good morning";
+    if (hour < 18) return "Good afternoon";
+    return "Good evening";
+  }
+
   render() {
     if (!this._hass) return;
 
@@ -184,17 +193,22 @@ class GlassDashboardCard extends HTMLElement {
     const bedroomOn = this.anyOn(e.bedroomLights);
     const gameOn = this.anyOn(e.gameLights);
     const utilityOn = this.anyOn(e.utilityLights);
-    const toonOn = this.anyOn(e.toonLights);
     const battery = this.fmt(e.teslaBattery, "%", "Unknown");
     const batteryRaw = Number(this.st(e.teslaBattery, "0"));
     const range = this.fmt(e.teslaRange, " km", "Unknown", 0);
     const teslaPlace = this.st(e.teslaLocation, "Away");
+    const teslaStatus = this.niceState(e.teslaStatus, "Asleep");
+    const teslaDetails = [
+      `Port ${this.niceState(e.teslaChargePort, "Unknown")}`,
+      `Boot ${this.niceState(e.teslaBoot, "Unknown")}`,
+      `Frunk ${this.niceState(e.teslaFrunk, "Unknown")}`,
+    ].join(" · ");
     const weatherState = this.st(e.weather, "rainy");
     const weatherTemp = this.attr(e.weather, "temperature", "11.6");
     const weatherHumidity = this.attr(e.weather, "humidity", "--");
     const weatherWind = this.attr(e.weather, "wind_speed", "--");
-    const spotifyTitle = this.attr(e.spotify, "media_title", "De Mortanges");
-    const spotifyArtist = this.attr(e.spotify, "media_artist", "Spotify · Tristan Pahud");
+    const spotifyTitle = this.attr(e.spotify, "media_title", "Spotify");
+    const spotifyArtist = this.attr(e.spotify, "media_artist", "Nothing playing");
     const spotifyState = this.niceState(e.spotify, "Idle");
     const speakerState = this.niceState(e.spotifySpeaker, "Idle");
     const volumePct = Math.round(Number(this.attr(e.spotifySpeaker, "volume_level", 0) || 0) * 100);
@@ -206,7 +220,10 @@ class GlassDashboardCard extends HTMLElement {
         <div class="dash">
           <div class="bg"></div>
           <div class="topbar z1">
-            <div class="home-lbl">Home</div>
+            <div>
+              <div class="home-lbl">${this.greeting()}</div>
+              <div class="home-sub">Home overview</div>
+            </div>
             <div class="clock-wrap">
               <div class="clk-time" id="clk-t">00:00</div>
               <div class="clk-date" id="clk-d">Thu, 14 May</div>
@@ -230,7 +247,6 @@ class GlassDashboardCard extends HTMLElement {
                     ${this.room("Main Room", "mdi:sofa-outline", livingOn, "main")}
                     ${this.room("Master Bed", "mdi:bed-king-outline", bedroomOn, "bedroom")}
                     ${this.room("Game Room", "mdi:gamepad-variant-outline", gameOn, "game")}
-                    ${this.room("Toon's Room", "mdi:cat", toonOn, "toon")}
                     ${this.room("Utility", "mdi:home-floor-1", utilityOn, "utility")}
                     <button class="gl room alloff" data-action="all-off"><div class="rdot"></div><ha-icon class="ri" icon="mdi:power"></ha-icon><div class="rn">All Off</div></button>
                   </div>
@@ -238,7 +254,7 @@ class GlassDashboardCard extends HTMLElement {
                 ${this.climateSummary("Living Room · Climate", e.livingTemp, e.livingHumidity, e.livingAir)}
                 ${this.climateSummary("Master Bedroom · Climate", e.bedTemp, e.bedHumidity, e.bedAir)}
                 <section class="gl block weather">
-                  <div class="slbl">Weather · De Mortanges</div>
+                  <div class="slbl">Weather · Outside</div>
                   <div class="wx-main">
                     <ha-icon class="wx-ico" icon="${this.weatherIcon(weatherState)}"></ha-icon>
                     <div><div class="wx-tmp">${weatherTemp}<span>°C</span></div><div class="wx-cond">${weatherState} · ${weatherHumidity}% · ${weatherWind} km/h</div></div>
@@ -253,8 +269,8 @@ class GlassDashboardCard extends HTMLElement {
                     ${this.carSvg()}
                   </div>
                   <div class="tesla-stats">
-                    <div class="tesla-hdr"><div class="tesla-name">Model 3</div><div class="tag">${teslaPlace}</div></div>
-                    <div class="batt-row"><div class="bpct">${battery.replace("%", "")}<span>%</span></div><div class="bkm">${range}</div></div>
+                    <div class="tesla-hdr"><div><div class="tesla-name">Model 3</div><div class="tesla-sub">${teslaDetails}</div></div><div class="tag">${teslaPlace}</div></div>
+                    <div class="batt-row"><div class="bpct ${battery === "Unknown" ? "waiting" : ""}">${battery === "Unknown" ? "Wake car" : battery.replace("%", "")}<span>${battery === "Unknown" ? "" : "%"}</span></div><div class="bkm">${range === "Unknown" ? teslaStatus : range}</div></div>
                     <div class="bbar"><div class="bfill" style="width:${Number.isFinite(batteryRaw) ? batteryRaw : 0}%"></div></div>
                     <div class="tbtns">
                       ${this.teslaButton("climate", "mdi:fan", "Climate", this.isOn(e.teslaClimate))}
@@ -286,7 +302,7 @@ class GlassDashboardCard extends HTMLElement {
           ${this.roomPage("bed", "Master Bedroom", "Sleep environment", e.bedroomLights, e.bedTemp, e.bedHumidity, e.bedAir)}
           ${this.roomPage("game", "Game Room", "Office · Gaming", e.gameLights)}
           ${this.toonPage()}
-          ${this.roomPage("util", "Utility", "Hallway · Bathroom · Storage", e.utilityLights)}
+          ${this.roomPage("util", "Utility", "Toilet · Hallway/Door", e.utilityLights)}
         </div>
       </ha-card>
     `;
@@ -308,7 +324,6 @@ class GlassDashboardCard extends HTMLElement {
         bedroom: this.entities.bedroomLights,
         game: this.entities.gameLights,
         utility: this.entities.utilityLights,
-        toon: this.entities.toonLights,
       };
       button.addEventListener("click", () => this.toggleGroup(map[button.dataset.room] || []));
     });
@@ -390,8 +405,9 @@ class GlassDashboardCard extends HTMLElement {
   lightItem(entity) {
     const name = this.attr(entity, "friendly_name", entity);
     const on = this.isOn(entity);
+    const icon = entity.startsWith("light.") ? "mdi:lightbulb-outline" : entity.includes("camera") ? "mdi:cctv" : entity.includes("feeder") ? "mdi:food-drumstick-outline" : "mdi:toggle-switch-outline";
     return `<button class="light-item ${on ? "on" : ""}" data-entity="${entity}">
-      <div class="li-left"><ha-icon class="li-ico" icon="mdi:lightbulb-outline"></ha-icon><div><div class="li-name">${name}</div><div class="li-sub">${on ? "On" : "Off"}</div></div></div><div class="lisw"></div>
+      <div class="li-left"><ha-icon class="li-ico" icon="${icon}"></ha-icon><div><div class="li-name">${name}</div><div class="li-sub">${on ? "On" : "Off"}</div></div></div><div class="lisw"></div>
     </button>`;
   }
 
@@ -416,18 +432,15 @@ class GlassDashboardCard extends HTMLElement {
 
   toonPage() {
     const e = this.entities;
+    const feederOn = this.anyOn(e.toonDevices);
     return `<div class="page ${this._tab === "toon" ? "active" : ""} z1">
       <div class="g2">
         <div class="col">
           <section class="gl rp-hero">
             <div class="slbl">Toon's Room</div>
             <div class="rp-title">Toon's Room</div>
-            <div class="rp-sub">Pet feeder · camera · litter sensors</div>
-            <button class="big-toggle ${this.anyOn(e.toonLights) ? "on" : ""}" data-room="toon"><div class="bt-label">Indicator light · ${this.countOn(e.toonLights)} on</div><div class="sw"></div></button>
-          </section>
-          <section class="gl block">
-            <div class="slbl">Light</div>
-            <div class="light-list">${e.toonLights.map((entity) => this.lightItem(entity)).join("")}</div>
+            <div class="rp-sub">Pet feeder only</div>
+            <div class="pet-status ${feederOn ? "on" : ""}"><ha-icon icon="mdi:food-drumstick-outline"></ha-icon><div><b>${feederOn ? "Active" : "Standby"}</b><span>Feeder controls and camera options</span></div></div>
           </section>
           <section class="gl block">
             <div class="slbl">Pet Feeder</div>
@@ -497,7 +510,8 @@ class GlassDashboardCard extends HTMLElement {
       .slbl{color:rgba(255,255,255,.58);font-weight:800}.home-lbl{color:rgba(255,255,255,.64);font-weight:800}.clk-time{font-weight:300;color:rgba(255,255,255,.96)}.clk-date{color:rgba(255,255,255,.68)}.tab{color:rgba(255,255,255,.58);border-color:rgba(255,255,255,.06);background:rgba(255,255,255,.06);font-weight:700}.tab.active{background:rgba(255,255,255,.16);border-color:rgba(255,255,255,.3);color:rgba(255,255,255,.98)}.rn{font-size:9px;font-weight:700;color:rgba(255,255,255,.62)}.room.on .rn{color:rgba(255,255,255,.94)}.ri{color:rgba(255,255,255,.42)}.room.on .ri{color:rgba(225,215,255,.98)}.cv{font-size:18px;font-weight:300;color:rgba(255,255,255,.96)}.cu{color:rgba(255,255,255,.52)}.cl{color:rgba(255,255,255,.42)}.cgood{color:#7fffd4;font-weight:700}.tesla-name{font-size:14px;font-weight:700;color:rgba(255,255,255,.92)}.tag{color:rgba(255,255,255,.6);background:rgba(255,255,255,.1);border-color:rgba(255,255,255,.13)}.bpct{font-size:28px;font-weight:300}.bpct span{color:rgba(255,255,255,.5)}.bkm{font-size:12px;font-weight:600;color:rgba(255,255,255,.62)}.bbar{height:3px;background:rgba(255,255,255,.14)}.tb{background:rgba(255,255,255,.06);border-color:rgba(255,255,255,.1)}.tb ha-icon{color:rgba(255,255,255,.5)}.tb span{color:rgba(255,255,255,.44);font-weight:700}.wx-ico{color:rgba(255,255,255,.62)}.wx-tmp{font-weight:300;color:rgba(255,255,255,.94)}.wx-tmp span{color:rgba(255,255,255,.5)}.wx-cond{color:rgba(255,255,255,.52)}.wxdn{color:rgba(255,255,255,.46)}.wxdi{color:rgba(255,255,255,.58)}.wxdh{font-size:11px;color:rgba(255,255,255,.76)}.wxdl{font-size:8.5px;color:rgba(255,255,255,.42)}
       .sp{padding:13px;gap:12px}.sp-ico{width:42px;height:42px;background:linear-gradient(145deg,rgba(29,185,84,.3),rgba(29,185,84,.08));border-color:rgba(29,185,84,.38)}.sp-ico ha-icon{--mdc-icon-size:22px}.sp-head{display:flex;align-items:center;gap:8px;min-width:0}.sp-t{font-size:14px;font-weight:800;color:rgba(255,255,255,.9)}.sp-pill{font-size:8px;color:rgba(255,255,255,.7);padding:2px 7px;border-radius:999px;background:rgba(255,255,255,.1);text-transform:uppercase;letter-spacing:.5px;white-space:nowrap}.sp-a{font-size:10px;color:rgba(255,255,255,.56)}.sp-meta{display:flex;justify-content:space-between;gap:12px;margin-top:8px;font-size:9px;color:rgba(255,255,255,.54)}.sp-progress{height:3px;border-radius:3px;background:rgba(255,255,255,.14);margin-top:5px;overflow:hidden}.sp-progress div{height:100%;border-radius:3px;background:#1DB954}.bars{height:16px}.bar{width:3px;border-radius:2px}.bars.idle .bar{animation:none;height:5px;background:rgba(255,255,255,.34)}.media-strip{padding:10px 12px;display:grid;grid-template-columns:1fr 1fr;gap:8px}.media-item{display:flex;align-items:center;gap:8px;min-width:0}.media-item ha-icon{--mdc-icon-size:18px;color:rgba(255,255,255,.68)}.media-item b{display:block;font-size:10px;color:rgba(255,255,255,.86);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.media-item span{display:block;font-size:8.5px;color:rgba(255,255,255,.52);margin-top:1px}
       .light-item{border-color:rgba(255,255,255,.1);background:rgba(255,255,255,.06)}.light-item:hover{background:rgba(255,255,255,.09)}.light-item.on{background:rgba(167,139,250,.14);border-color:rgba(167,139,250,.3)}.li-ico{color:rgba(255,255,255,.5)}.light-item.on .li-ico{color:rgba(230,220,255,.94)}.li-name{font-size:11px;font-weight:700;color:rgba(255,255,255,.7)}.light-item.on .li-name{color:rgba(255,255,255,.94)}.li-sub{font-size:8.5px;color:rgba(255,255,255,.4)}
-      .rooms5{grid-template-columns:repeat(6,1fr)}
+      .home-sub{font-size:9.5px;color:rgba(255,255,255,.42);margin-top:2px}.tesla-sub{font-size:8.5px;color:rgba(255,255,255,.46);margin-top:3px}.bpct.waiting{font-size:23px;letter-spacing:-1px}.pet-status{display:flex;align-items:center;gap:11px;margin-top:13px;padding:12px;border-radius:12px;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.1)}.pet-status.on{background:rgba(167,139,250,.13);border-color:rgba(167,139,250,.28)}.pet-status ha-icon{--mdc-icon-size:24px;color:rgba(255,255,255,.68)}.pet-status b{display:block;font-size:12px;color:rgba(255,255,255,.88)}.pet-status span{display:block;font-size:9px;color:rgba(255,255,255,.5);margin-top:2px}
+      .rooms5{grid-template-columns:repeat(5,1fr)}
       @media (max-width: 820px){.dash{min-height:calc(100vh - 80px);border-radius:0}.g2{grid-template-columns:1fr}.rooms5{grid-template-columns:repeat(3,1fr)}.car-area{height:135px}.page{padding:10px}.tab{padding:7px 10px}.weather{order:10}.media-strip{grid-template-columns:1fr}}
     `;
   }
