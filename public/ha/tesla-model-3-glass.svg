@@ -1,0 +1,49 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 620" role="img" aria-label="Sleek electric sedan render">
+  <defs>
+    <radialGradient id="glow" cx="52%" cy="48%" r="58%">
+      <stop offset="0" stop-color="#9fd8ff" stop-opacity=".44"/>
+      <stop offset=".48" stop-color="#4f8dff" stop-opacity=".18"/>
+      <stop offset="1" stop-color="#07111f" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="body" x1="178" x2="1018" y1="232" y2="442">
+      <stop offset="0" stop-color="#eff6ff"/>
+      <stop offset=".28" stop-color="#bfc9d7"/>
+      <stop offset=".52" stop-color="#ffffff"/>
+      <stop offset=".76" stop-color="#8c98aa"/>
+      <stop offset="1" stop-color="#f8fbff"/>
+    </linearGradient>
+    <linearGradient id="glass" x1="346" x2="832" y1="132" y2="296">
+      <stop offset="0" stop-color="#d8f0ff" stop-opacity=".86"/>
+      <stop offset=".55" stop-color="#567395" stop-opacity=".68"/>
+      <stop offset="1" stop-color="#132033" stop-opacity=".88"/>
+    </linearGradient>
+    <linearGradient id="shadow" x1="180" x2="1030" y1="500" y2="520">
+      <stop offset="0" stop-color="#000" stop-opacity="0"/>
+      <stop offset=".18" stop-color="#000" stop-opacity=".32"/>
+      <stop offset=".5" stop-color="#000" stop-opacity=".52"/>
+      <stop offset=".82" stop-color="#000" stop-opacity=".32"/>
+      <stop offset="1" stop-color="#000" stop-opacity="0"/>
+    </linearGradient>
+    <filter id="soft" x="-20%" y="-30%" width="140%" height="170%">
+      <feGaussianBlur stdDeviation="14"/>
+    </filter>
+  </defs>
+  <rect width="1200" height="620" fill="none"/>
+  <ellipse cx="600" cy="292" rx="510" ry="300" fill="url(#glow)"/>
+  <ellipse cx="600" cy="512" rx="432" ry="38" fill="url(#shadow)" filter="url(#soft)"/>
+  <path fill="#0e1726" opacity=".55" d="M206 399c21-65 94-94 210-102 102-102 212-135 361-84 78 27 139 68 190 122 56 7 93 28 111 65 8 16 1 34-16 38-134 35-711 40-834 6-22-6-30-24-22-45Z"/>
+  <path fill="url(#body)" d="M171 381c37-55 117-83 240-91 96-97 206-129 354-84 85 26 150 72 198 127 71 8 120 31 146 69 8 12 6 31-8 39-58 36-246 48-447 48-221 0-431-14-489-55-14-10-5-39 6-53Z"/>
+  <path fill="#f8fbff" opacity=".72" d="M261 356c43-24 103-37 178-40 58-56 113-87 182-95 80-9 169 19 250 86-176-30-373-26-610 49Z"/>
+  <path fill="url(#glass)" d="M449 288c62-54 113-78 176-82 72-5 144 21 217 82H449Z"/>
+  <path fill="#dce7f5" opacity=".9" d="M432 300c-75 6-133 18-174 38 209-53 424-64 641-27-91-23-185-35-281-36-67-1-130 8-186 25Z"/>
+  <path fill="#ffffff" opacity=".72" d="M257 372c191-48 439-66 710-25 44 7 83 22 118 44-164-53-620-62-828-19Z"/>
+  <path fill="#1e293b" opacity=".88" d="M260 431c109 30 562 38 777 1-41 32-204 46-398 46-187 0-341-13-379-47Z"/>
+  <circle cx="351" cy="426" r="63" fill="#0a0f18"/>
+  <circle cx="351" cy="426" r="39" fill="#64748b"/>
+  <circle cx="351" cy="426" r="20" fill="#e2e8f0"/>
+  <circle cx="875" cy="426" r="63" fill="#0a0f18"/>
+  <circle cx="875" cy="426" r="39" fill="#64748b"/>
+  <circle cx="875" cy="426" r="20" fill="#e2e8f0"/>
+  <path fill="#ffffff" opacity=".78" d="M198 403c31-9 58-12 80-9-15 11-35 18-61 20-13 1-20-3-19-11Zm827-2c29-1 51 2 69 10-12 9-30 13-54 11-17-1-24-8-15-21Z"/>
+  <path fill="#38bdf8" opacity=".42" d="M444 296h407c-26 12-96 21-205 23-106 2-174-6-202-23Z"/>
+</svg>
