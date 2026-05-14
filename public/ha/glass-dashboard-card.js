@@ -7,48 +7,40 @@ class GlassDashboardCard extends HTMLElement {
     this._config = {};
     this.entities = {
       mainLights: [
-        "light.lounge_light",
-        "light.living_room",
-        "light.reading_light",
-        "light.dining_room",
-        "light.led_keuken_boven",
-        "light.led_keuken_onder",
-        "light.led_strip_4",
-        "light.govee_tv_left",
-        "light.govee_tv_right",
-        "light.rgbic_tv_backlight",
-        "light.tv_left",
-        "light.tv_right",
-        "light.marylin",
+        "light.lounge_light","light.living_room","light.reading_light",
+        "light.dining_room","light.led_keuken_boven","light.led_keuken_onder",
+        "light.led_strip_4","light.govee_tv_left","light.govee_tv_right",
+        "light.rgbic_tv_backlight","light.tv_left","light.tv_right","light.marylin",
       ],
-      bedroomLights: ["light.bed", "switch.night_light", "light.kast", "light.closet"],
-      gameLights: ["light.plafond", "light.desk_lamp", "light.desk_led_strip", "light.battletron_smart_desk_light_strip", "light.battletron_smart_desk_light_strip_2"],
-      utilityLights: ["light.toilet", "light.hallway_door"],
-      livingTemp: "sensor.living_room_sensor_temperature",
+      bedroomLights: ["light.bed","switch.night_light","light.kast","light.closet"],
+      gameLights: ["light.plafond","light.desk_lamp","light.desk_led_strip","light.battletron_smart_desk_light_strip","light.battletron_smart_desk_light_strip_2"],
+      utilityLights: ["light.toilet","light.hallway_door"],
+      livingTemp:     "sensor.living_room_sensor_temperature",
       livingHumidity: "sensor.living_room_sensor_humidity",
-      livingAir: "sensor.living_room_sensor_air_quality",
-      bedTemp: "sensor.bedroom_sensor_temperature",
-      bedHumidity: "sensor.bedroom_sensor_humidity",
-      bedAir: "sensor.bedroom_sensor_air_quality",
-      weather: "weather.forecast_home",
-      teslaClimate: "climate.model_3_climate",
-      teslaBattery: "sensor.model_3_battery_level",
-      teslaRange: "sensor.model_3_battery_range",
-      teslaLocation: "device_tracker.model_3_location",
-      teslaDefrost: "switch.model_3_defrost",
-      teslaSentry: "switch.model_3_sentry_mode",
-      teslaCharge: "switch.model_3_charge",
-      teslaLock: "lock.model_3_lock",
-      teslaStatus: "binary_sensor.model_3_status",
-      teslaChargePort: "cover.model_3_charge_port_door",
-      teslaFrunk: "cover.model_3_froot",
-      teslaBoot: "cover.model_3_boot",
-      spotify: "media_player.spotify_tristan_pahud_de_mortanges",
+      livingAir:      "sensor.living_room_sensor_air_quality",
+      bedTemp:        "sensor.bedroom_sensor_temperature",
+      bedHumidity:    "sensor.bedroom_sensor_humidity",
+      bedAir:         "sensor.bedroom_sensor_air_quality",
+      weather:        "weather.forecast_home",
+      teslaClimate:   "climate.model_3_climate",
+      teslaBattery:   "sensor.model_3_battery_level",
+      teslaRange:     "sensor.model_3_battery_range",
+      teslaLocation:  "device_tracker.model_3_location",
+      teslaDefrost:   "switch.model_3_defrost",
+      teslaSentry:    "switch.model_3_sentry_mode",
+      teslaCharge:    "switch.model_3_charge",
+      teslaLock:      "lock.model_3_lock",
+      teslaStatus:    "binary_sensor.model_3_status",
+      teslaChargePort:"cover.model_3_charge_port_door",
+      teslaFrunk:     "cover.model_3_froot",
+      teslaBoot:      "cover.model_3_boot",
+      // Spotify entity = track info / Speaker entity = playback control
+      spotify:        "media_player.spotify_tristan_pahud_de_mortanges",
       spotifySpeaker: "media_player.dining_room",
-      tv: "media_player.lg_webos_tv_oled65c54la_2",
-      toonDevices: ["light.pet_feeder_indicator_light", "switch.pet_feeder_motion_alarm", "switch.pet_feeder_motion_recording", "switch.pet_feeder_time_watermark"],
-      toonSensors: ["sensor.poopas_poops_cat_weight", "sensor.poopas_poops_excretion_duration", "sensor.poopas_poops_excretion_times_day"],
-      petFeederCamera: "camera.pet_feeder",
+      tv:             "media_player.lg_webos_tv_oled65c54la_2",
+      toonDevices:    ["light.pet_feeder_indicator_light","switch.pet_feeder_motion_alarm","switch.pet_feeder_motion_recording","switch.pet_feeder_time_watermark"],
+      toonSensors:    ["sensor.poopas_poops_cat_weight","sensor.poopas_poops_excretion_duration","sensor.poopas_poops_excretion_times_day"],
+      petFeederCamera:"camera.pet_feeder",  // VERIFY: check Settings → Entities → search "camera"
     };
   }
 
@@ -58,9 +50,7 @@ class GlassDashboardCard extends HTMLElement {
     this._hass = hass;
     this.loadForecast();
     this.render();
-    if (!this._timer) {
-      this._timer = window.setInterval(() => this.updateClock(), 10000);
-    }
+    if (!this._timer) this._timer = window.setInterval(() => this.updateClock(), 10000);
   }
 
   disconnectedCallback() {
@@ -71,9 +61,9 @@ class GlassDashboardCard extends HTMLElement {
   getCardSize() { return 12; }
 
   st(entity, fallback = "Unknown") {
-    const state = this._hass?.states?.[entity]?.state;
-    if (!state || state === "unavailable" || state === "unknown") return fallback;
-    return state;
+    const s = this._hass?.states?.[entity]?.state;
+    if (!s || s === "unavailable" || s === "unknown") return fallback;
+    return s;
   }
 
   attr(entity, key, fallback = undefined) {
@@ -88,17 +78,17 @@ class GlassDashboardCard extends HTMLElement {
   }
 
   niceState(entity, fallback = "Unknown") {
-    const state = this.st(entity, fallback);
-    if (state === fallback) return fallback;
-    return state.replaceAll("_", " ").replace(/\b\w/g, (c) => c.toUpperCase());
+    const s = this.st(entity, fallback);
+    if (s === fallback) return fallback;
+    return s.replaceAll("_", " ").replace(/\b\w/g, c => c.toUpperCase());
   }
 
   isOn(entity) {
-    return ["on", "heat", "cool", "playing", "home"].includes(this._hass?.states?.[entity]?.state);
+    return ["on","heat","cool","playing","home"].includes(this._hass?.states?.[entity]?.state);
   }
 
-  anyOn(entities) { return entities.some((e) => this.isOn(e)); }
-  countOn(entities) { return entities.filter((e) => this.isOn(e)).length; }
+  anyOn(entities) { return entities.some(e => this.isOn(e)); }
+  countOn(entities) { return entities.filter(e => this.isOn(e)).length; }
 
   service(domain, svc, data) { return this._hass?.callService(domain, svc, data); }
   toggleEntity(entity) { const d = entity.split(".")[0]; this.service(d, "toggle", { entity_id: entity }); }
@@ -106,54 +96,77 @@ class GlassDashboardCard extends HTMLElement {
 
   turnOffAll() {
     this.service("homeassistant", "turn_off", {
-      entity_id: [
-        ...this.entities.mainLights,
-        ...this.entities.bedroomLights,
-        ...this.entities.gameLights,
-        ...this.entities.utilityLights,
-      ],
+      entity_id: [...this.entities.mainLights,...this.entities.bedroomLights,...this.entities.gameLights,...this.entities.utilityLights],
     });
   }
 
   toggleClimate() {
-    const current = this._hass?.states?.[this.entities.teslaClimate]?.state;
-    this.service("climate", current === "off" ? "turn_on" : "turn_off", { entity_id: this.entities.teslaClimate });
+    const cur = this._hass?.states?.[this.entities.teslaClimate]?.state;
+    this.service("climate", cur === "off" ? "turn_on" : "turn_off", { entity_id: this.entities.teslaClimate });
+  }
+
+  // Pick the best entity to send media commands to (speaker if active, else Spotify entity)
+  mediaControlTarget() {
+    const spkState = this.st(this.entities.spotifySpeaker, "idle");
+    if (["playing","paused","on"].includes(spkState)) return this.entities.spotifySpeaker;
+    return this.entities.spotify;
   }
 
   async loadForecast() {
     if (this._forecastLoading || (this._forecastLoaded && this._forecast?.length) || !this._hass?.callWS) return;
     this._forecastLoading = true;
     try {
-      const data = await this._hass.callWS({
-        type: "weather/get_forecasts",
-        entity_id: this.entities.weather,
-        forecast_type: "daily",
-      });
+      const data = await this._hass.callWS({ type: "weather/get_forecasts", entity_id: this.entities.weather, forecast_type: "daily" });
       this._forecast = data?.[this.entities.weather]?.forecast || [];
       this._forecastLoaded = true;
       this.render();
-    } catch {
-      this._forecastLoaded = false;
-    } finally {
-      this._forecastLoading = false;
-    }
+    } catch { this._forecastLoaded = false; }
+    finally { this._forecastLoading = false; }
   }
 
   weatherIcon(state) {
-    const icons = {
-      rainy: "mdi:weather-rainy", pouring: "mdi:weather-pouring",
-      cloudy: "mdi:weather-cloudy", partlycloudy: "mdi:weather-partly-cloudy",
-      sunny: "mdi:weather-sunny", clear: "mdi:weather-night",
-      "clear-night": "mdi:weather-night", fog: "mdi:weather-fog", snowy: "mdi:weather-snowy",
-    };
-    return icons[state] || "mdi:weather-partly-cloudy";
+    const m = { rainy:"mdi:weather-rainy", pouring:"mdi:weather-pouring", cloudy:"mdi:weather-cloudy",
+      partlycloudy:"mdi:weather-partly-cloudy", sunny:"mdi:weather-sunny", clear:"mdi:weather-night",
+      "clear-night":"mdi:weather-night", fog:"mdi:weather-fog", snowy:"mdi:weather-snowy",
+      windy:"mdi:weather-windy", hail:"mdi:weather-hail" };
+    return m[state] || "mdi:weather-partly-cloudy";
   }
 
   fmtTime(secs) {
     if (!secs || secs < 0) return "0:00";
-    const s = Math.round(secs);
-    const m = Math.floor(s / 60);
+    const s = Math.round(secs), m = Math.floor(s / 60);
     return `${m}:${String(s % 60).padStart(2, "0")}`;
+  }
+
+  aqColor(val) {
+    const v = String(val).toLowerCase();
+    if (v.includes("good") || v.includes("excellent")) return "#34d399";
+    if (v.includes("fair") || v.includes("moderate")) return "#fbbf24";
+    if (v.includes("poor") || v.includes("unhealthy")) return "#f87171";
+    if (v.includes("very") || v.includes("hazard")) return "#c084fc";
+    return "#34d399";
+  }
+
+  // Web Audio click sound
+  playClick() {
+    try {
+      const ctx = new (window.AudioContext || window.webkitAudioContext)();
+      const t = ctx.currentTime;
+      [
+        { freq: [1100, 450], gain: [0.07, 0.001], dur: 0.07 },
+        { freq: [2200, 900], gain: [0.035, 0.001], dur: 0.045 },
+      ].forEach(({ freq, gain, dur }) => {
+        const o = ctx.createOscillator(), g = ctx.createGain();
+        o.connect(g); g.connect(ctx.destination);
+        o.type = "sine";
+        o.frequency.setValueAtTime(freq[0], t);
+        o.frequency.exponentialRampToValueAtTime(freq[1], t + dur);
+        g.gain.setValueAtTime(gain[0], t);
+        g.gain.exponentialRampToValueAtTime(gain[1], t + dur);
+        o.start(t); o.stop(t + dur);
+      });
+      setTimeout(() => ctx.close(), 400);
+    } catch {}
   }
 
   updateClock() {
@@ -177,44 +190,50 @@ class GlassDashboardCard extends HTMLElement {
     const bedroomOn = this.anyOn(e.bedroomLights);
     const gameOn    = this.anyOn(e.gameLights);
     const utilityOn = this.anyOn(e.utilityLights);
+
     const battery    = this.fmt(e.teslaBattery, "%", "Unknown");
     const batteryRaw = Number(this.st(e.teslaBattery, "0"));
     const range      = this.fmt(e.teslaRange, " km", "Unknown", 0);
     const teslaPlace = this.st(e.teslaLocation, "Away");
     const teslaStatus = this.niceState(e.teslaStatus, "Asleep");
-    const teslaDetails = [
-      `Port ${this.niceState(e.teslaChargePort, "Unknown")}`,
-      `Boot ${this.niceState(e.teslaBoot, "Unknown")}`,
-      `Frunk ${this.niceState(e.teslaFrunk, "Unknown")}`,
-    ].join(" · ");
-    const weatherState    = this.st(e.weather, "rainy");
-    const weatherTemp     = this.attr(e.weather, "temperature", "11.6");
+    const teslaDetails = [`Port ${this.niceState(e.teslaChargePort,"?")}`,`Boot ${this.niceState(e.teslaBoot,"?")}`,`Frunk ${this.niceState(e.teslaFrunk,"?")}`].join(" · ");
+
+    // Weather
+    const weatherState    = this.st(e.weather, "clear-night");
+    const weatherTemp     = this.attr(e.weather, "temperature", "--");
     const weatherHumidity = this.attr(e.weather, "humidity", "--");
     const weatherWind     = this.attr(e.weather, "wind_speed", "--");
+    const weatherFeels    = this.attr(e.weather, "apparent_temperature", null);
+    const weatherUV       = this.attr(e.weather, "uv_index", null);
+    const weatherVis      = this.attr(e.weather, "visibility", null);
+    const weatherDew      = this.attr(e.weather, "dew_point", null);
 
-    // Spotify
+    // Spotify - read from Spotify entity, control via speaker
     const spotifyTitle   = this.attr(e.spotify, "media_title", "");
     const spotifyArtist  = this.attr(e.spotify, "media_artist", "");
     const spotifyAlbum   = this.attr(e.spotify, "media_album_name", "");
-    const spotifyPic     = this.attr(e.spotify, "entity_picture", "");
+    const spotifyPic     = this.attr(e.spotify, "entity_picture", "") || this.attr(e.spotifySpeaker, "entity_picture", "");
     const spotifyState   = this.st(e.spotify, "idle");
-    const spotifyPlaying = spotifyState === "playing";
-    const spotifyPaused  = spotifyState === "paused";
-    const spotifyActive  = spotifyPlaying || spotifyPaused;
+    const spkState       = this.st(e.spotifySpeaker, "idle");
+    const spotifyPlaying = spotifyState === "playing" || spkState === "playing";
+    const spotifyActive  = ["playing","paused"].includes(spotifyState) || ["playing","paused"].includes(spkState);
     const durSec         = Number(this.attr(e.spotify, "media_duration", 0)) || 0;
     const posSec         = Number(this.attr(e.spotify, "media_position", 0)) || 0;
     const posUpdatedAt   = this.attr(e.spotify, "media_position_updated_at", null);
     const elapsed        = posUpdatedAt && spotifyPlaying ? (Date.now() - new Date(posUpdatedAt).getTime()) / 1000 : 0;
-    const currentPos     = Math.min(posSec + elapsed, durSec);
+    const currentPos     = Math.min(posSec + elapsed, durSec || 1);
     const spProgress     = durSec > 0 ? Math.min((currentPos / durSec) * 100, 100) : 0;
     const volumePct      = Math.round(Number(this.attr(e.spotifySpeaker, "volume_level", 0) || 0) * 100);
     const tvState        = this.niceState(e.tv, "Off");
     const speakerState   = this.niceState(e.spotifySpeaker, "Idle");
 
-    this.shadowRoot.innerHTML = `
-<style>${this.css()}</style>
-<ha-card>
-<div class="dash">
+    // Camera - use entity_picture with embedded token (works without extra auth)
+    const camState = this._hass?.states?.[e.petFeederCamera];
+    const camUrl   = camState?.attributes?.entity_picture
+      ? camState.attributes.entity_picture.startsWith("http") ? camState.attributes.entity_picture : `http://192.168.0.108:8123${camState.attributes.entity_picture}&t=${Date.now()}`
+      : `/api/camera_proxy/${e.petFeederCamera}?t=${Date.now()}`;
+
+    this.shadowRoot.innerHTML = `<style>${this.css()}</style><ha-card><div class="dash">
   <div class="bg"></div>
 
   <div class="topbar z1">
@@ -229,25 +248,26 @@ class GlassDashboardCard extends HTMLElement {
   </div>
 
   <div class="tabs z1">
-    ${this.tab("ov",   "mdi:view-dashboard-outline",  "Overview")}
-    ${this.tab("liv",  "mdi:sofa-outline",             "Living Room")}
-    ${this.tab("bed",  "mdi:bed-king-outline",          "Master Bedroom")}
-    ${this.tab("game", "mdi:gamepad-variant-outline",  "Game Room")}
-    ${this.tab("toon", "mdi:cat",                      "Toon's Room")}
-    ${this.tab("util", "mdi:home-floor-1",             "Utility")}
+    ${this.tab("ov",   "mdi:view-dashboard-outline", "Overview")}
+    ${this.tab("liv",  "mdi:sofa-outline",            "Living Room")}
+    ${this.tab("bed",  "mdi:bed-king-outline",         "Master Bedroom")}
+    ${this.tab("game", "mdi:gamepad-variant-outline", "Game Room")}
+    ${this.tab("toon", "mdi:cat",                     "Toon's Room")}
+    ${this.tab("util", "mdi:home-floor-1",            "Utility")}
   </div>
   <div class="divider z1"></div>
 
-  <div class="page ${this._tab === "ov" ? "active" : ""} z1">
-    <div class="g2">
+  <!-- OVERVIEW -->
+  <div class="page page-ov ${this._tab === "ov" ? "active" : ""} z1">
+    <div class="ov-main">
       <div class="col">
         <section class="gl block">
           <div class="slbl">Lights</div>
           <div class="rooms5">
-            ${this.room("Living Room", "mdi:sofa-outline",            livingOn,  "main")}
-            ${this.room("Master Bed",  "mdi:bed-king-outline",         bedroomOn, "bedroom")}
-            ${this.room("Game Room",   "mdi:gamepad-variant-outline",  gameOn,    "game")}
-            ${this.room("Utility",     "mdi:home-floor-1",            utilityOn, "utility")}
+            ${this.room("Living Room","mdi:sofa-outline",           livingOn, "main")}
+            ${this.room("Master Bed", "mdi:bed-king-outline",        bedroomOn,"bedroom")}
+            ${this.room("Game Room",  "mdi:gamepad-variant-outline", gameOn,   "game")}
+            ${this.room("Utility",    "mdi:home-floor-1",           utilityOn,"utility")}
             <button class="gl room alloff" data-action="all-off">
               <div class="rdot"></div>
               <ha-icon class="ri" icon="mdi:power"></ha-icon>
@@ -257,26 +277,13 @@ class GlassDashboardCard extends HTMLElement {
         </section>
         ${this.climateSummary("Living Room · Climate", e.livingTemp, e.livingHumidity, e.livingAir)}
         ${this.climateSummary("Master Bedroom · Climate", e.bedTemp, e.bedHumidity, e.bedAir)}
-        <section class="gl block weather">
-          <div class="slbl">Weather · Outside</div>
-          <div class="wx-main">
-            <ha-icon class="wx-ico" icon="${this.weatherIcon(weatherState)}"></ha-icon>
-            <div>
-              <div class="wx-tmp">${weatherTemp}<span>°C</span></div>
-              <div class="wx-cond">${weatherState} · ${weatherHumidity}% · ${weatherWind} km/h</div>
-            </div>
-          </div>
-          <div class="wx-days">${this.forecastDays(weatherState)}</div>
-        </section>
       </div>
 
       <div class="col">
         <section class="gl tesla-card">
           <div class="car-area">
             <div class="car-glow"></div>
-            <img class="car-img"
-                 src="https://teslakortingscode.com/ha/tesla-model-3.png"
-                 alt="Tesla Model 3">
+            <img class="car-img" src="https://teslakortingscode.com/ha/tesla-model-3.png" alt="Tesla Model 3">
           </div>
           <div class="tesla-stats">
             <div class="tesla-hdr">
@@ -287,27 +294,24 @@ class GlassDashboardCard extends HTMLElement {
               <div class="tag">${teslaPlace}</div>
             </div>
             <div class="batt-row">
-              <div class="bpct ${battery === "Unknown" ? "waiting" : ""}">
-                ${battery === "Unknown" ? "Wake car" : battery.replace("%", "")}
-                <span>${battery === "Unknown" ? "" : "%"}</span>
-              </div>
+              <div class="bpct">${battery === "Unknown" ? "Wake car" : battery.replace("%","")}<span>${battery === "Unknown" ? "" : "%"}</span></div>
               <div class="bkm">${range === "Unknown" ? teslaStatus : range}</div>
             </div>
             <div class="bbar"><div class="bfill" style="width:${Number.isFinite(batteryRaw) ? batteryRaw : 0}%"></div></div>
             <div class="tbtns">
-              ${this.teslaButton("climate", "mdi:fan",                   "Climate", this.isOn(e.teslaClimate))}
-              ${this.teslaButton("defrost",  "mdi:car-defrost-front",     "Defrost", this.isOn(e.teslaDefrost))}
-              ${this.teslaButton("sentry",   "mdi:shield-check-outline",  "Sentry",  this.isOn(e.teslaSentry))}
-              ${this.teslaButton("charge",   "mdi:lightning-bolt-outline","Charge",  this.isOn(e.teslaCharge))}
-              ${this.teslaButton("wake",     "mdi:power-cycle",           "Wake",    false)}
+              ${this.teslaButton("climate","mdi:fan",                   "Climate",this.isOn(e.teslaClimate))}
+              ${this.teslaButton("defrost", "mdi:car-defrost-front",     "Defrost", this.isOn(e.teslaDefrost))}
+              ${this.teslaButton("sentry",  "mdi:shield-check-outline",  "Sentry",  this.isOn(e.teslaSentry))}
+              ${this.teslaButton("charge",  "mdi:lightning-bolt-outline","Charge",  this.isOn(e.teslaCharge))}
+              ${this.teslaButton("wake",    "mdi:power-cycle",           "Wake",    false)}
             </div>
           </div>
         </section>
 
-        <!-- Spotify Player -->
+        <!-- Spotify -->
         <section class="gl sp2">
           ${spotifyPic
-            ? `<img class="sp-art" src="${spotifyPic}" alt="album art">`
+            ? `<img class="sp-art" src="${spotifyPic}" alt="album">`
             : `<div class="sp-art sp-art-empty"><ha-icon icon="mdi:spotify"></ha-icon></div>`}
           <div class="sp-body">
             <div class="sp-track">${spotifyTitle || (spotifyActive ? "Playing" : "Spotify")}</div>
@@ -344,59 +348,76 @@ class GlassDashboardCard extends HTMLElement {
         </section>
       </div>
     </div>
+
+    <!-- Weather full-width -->
+    ${this.weatherSection(weatherState, weatherTemp, weatherHumidity, weatherWind, weatherFeels, weatherUV, weatherVis)}
   </div>
 
   ${this.roomPage("liv",  "Living Room",    "Kitchen · Dining · TV area", e.mainLights,    e.livingTemp, e.livingHumidity, e.livingAir)}
   ${this.roomPage("bed",  "Master Bedroom", "Sleep environment",           e.bedroomLights, e.bedTemp,    e.bedHumidity,    e.bedAir)}
   ${this.roomPage("game", "Game Room",      "Office · Gaming",             e.gameLights)}
-  ${this.toonPage()}
+  ${this.toonPage(camUrl)}
   ${this.roomPage("util", "Utility",        "Toilet · Hallway/Door",       e.utilityLights)}
-</div>
-</ha-card>`;
+</div></ha-card>`;
 
     this.updateClock();
     this.bindEvents();
   }
 
   bindEvents() {
-    this.shadowRoot.querySelectorAll("[data-tab]").forEach((btn) => {
-      btn.addEventListener("click", () => { this._tab = btn.dataset.tab; this.render(); });
+    // Click sound + press animation on all buttons
+    this.shadowRoot.querySelectorAll("button").forEach(btn => {
+      btn.addEventListener("pointerdown", () => {
+        this.playClick();
+        btn.classList.add("is-pressed");
+        setTimeout(() => btn.classList.remove("is-pressed"), 180);
+      });
     });
-    this.shadowRoot.querySelectorAll("[data-room]").forEach((btn) => {
-      const map = {
-        main: this.entities.mainLights, bedroom: this.entities.bedroomLights,
-        game: this.entities.gameLights, utility: this.entities.utilityLights,
-      };
+
+    this.shadowRoot.querySelectorAll("[data-tab]").forEach(btn =>
+      btn.addEventListener("click", () => { this._tab = btn.dataset.tab; this.render(); }));
+
+    this.shadowRoot.querySelectorAll("[data-room]").forEach(btn => {
+      const map = { main:this.entities.mainLights, bedroom:this.entities.bedroomLights, game:this.entities.gameLights, utility:this.entities.utilityLights };
       btn.addEventListener("click", () => this.toggleGroup(map[btn.dataset.room] || []));
     });
-    this.shadowRoot.querySelectorAll("[data-entity]").forEach((btn) => {
-      btn.addEventListener("click", () => this.toggleEntity(btn.dataset.entity));
-    });
+
+    this.shadowRoot.querySelectorAll("[data-entity]").forEach(btn =>
+      btn.addEventListener("click", () => this.toggleEntity(btn.dataset.entity)));
+
     this.shadowRoot.querySelector("[data-action='all-off']")?.addEventListener("click", () => this.turnOffAll());
+
     // Tesla
     this.shadowRoot.querySelector("[data-tesla='climate']")?.addEventListener("click", () => this.toggleClimate());
     this.shadowRoot.querySelector("[data-tesla='defrost']")?.addEventListener("click",  () => this.toggleEntity(this.entities.teslaDefrost));
     this.shadowRoot.querySelector("[data-tesla='sentry']")?.addEventListener("click",   () => this.toggleEntity(this.entities.teslaSentry));
     this.shadowRoot.querySelector("[data-tesla='charge']")?.addEventListener("click",   () => this.toggleEntity(this.entities.teslaCharge));
     this.shadowRoot.querySelector("[data-tesla='wake']")?.addEventListener("click",     () => this.service("button", "press", { entity_id: "button.model_3_wake" }));
-    // Spotify
+
+    // Spotify — always send to mediaControlTarget() so we hit the active entity
+    const tgt = () => this.mediaControlTarget();
     const sp = this.entities.spotify;
-    const spk = this.entities.spotifySpeaker;
-    this.shadowRoot.querySelector("[data-sp='play-pause']")?.addEventListener("click", () => this.service("media_player", "media_play_pause", { entity_id: sp }));
-    this.shadowRoot.querySelector("[data-sp='prev']")?.addEventListener("click",       () => this.service("media_player", "media_previous_track", { entity_id: sp }));
-    this.shadowRoot.querySelector("[data-sp='next']")?.addEventListener("click",       () => this.service("media_player", "media_next_track", { entity_id: sp }));
+    this.shadowRoot.querySelector("[data-sp='play-pause']")?.addEventListener("click", () => this.service("media_player","media_play_pause",{ entity_id: tgt() }));
+    this.shadowRoot.querySelector("[data-sp='prev']")?.addEventListener("click",       () => this.service("media_player","media_previous_track",{ entity_id: tgt() }));
+    this.shadowRoot.querySelector("[data-sp='next']")?.addEventListener("click",       () => this.service("media_player","media_next_track",{ entity_id: tgt() }));
     this.shadowRoot.querySelector("[data-sp='vol-up']")?.addEventListener("click", () => {
-      const cur = Number(this.attr(spk, "volume_level", 0)) || 0;
-      this.service("media_player", "volume_set", { entity_id: spk, volume_level: Math.min(1, cur + 0.05) });
+      const spk = this.entities.spotifySpeaker;
+      const cur = Number(this.attr(spk,"volume_level",0)) || 0;
+      this.service("media_player","volume_set",{ entity_id: spk, volume_level: Math.min(1, cur+0.05) });
     });
     this.shadowRoot.querySelector("[data-sp='vol-down']")?.addEventListener("click", () => {
-      const cur = Number(this.attr(spk, "volume_level", 0)) || 0;
-      this.service("media_player", "volume_set", { entity_id: spk, volume_level: Math.max(0, cur - 0.05) });
+      const spk = this.entities.spotifySpeaker;
+      const cur = Number(this.attr(spk,"volume_level",0)) || 0;
+      this.service("media_player","volume_set",{ entity_id: spk, volume_level: Math.max(0, cur-0.05) });
     });
+
     // Camera refresh
     this.shadowRoot.querySelector("[data-action='cam-refresh']")?.addEventListener("click", () => {
       const img = this.shadowRoot.querySelector(".cam-feed");
-      if (img) img.src = img.src.replace(/\?t=\d+/, "") + "?t=" + Date.now();
+      if (img) {
+        const base = img.src.replace(/[?&]t=\d+/, "");
+        img.src = base + (base.includes("?") ? "&" : "?") + "t=" + Date.now();
+      }
     });
   }
 
@@ -415,39 +436,72 @@ class GlassDashboardCard extends HTMLElement {
   }
 
   climateSummary(title, temp, humidity, air) {
+    const aqv = this.st(air, "Good");
+    const aqc = this.aqColor(aqv);
     return `<section class="gl block">
       <div class="slbl">${title}</div>
-      <div class="clim3">
-        <div class="glsm ci"><div class="cv">${this.fmt(temp,"","--",0)}<span class="cu">°</span></div><div class="cl">Temp</div></div>
-        <div class="glsm ci"><div class="cv">${this.fmt(humidity,"","--",0)}<span class="cu">%</span></div><div class="cl">Humidity</div></div>
-        <div class="glsm ci"><div class="cgood">${this.st(air,"Good")}</div><div class="cl">Air Quality</div></div>
+      <div class="clim-split">
+        <div class="clim-left">
+          <div class="glsm ci-sm">
+            <div class="cv-sm">${this.fmt(temp,"","--",1)}<span class="cu-sm">°</span></div>
+            <div class="cl-sm">Temp</div>
+          </div>
+          <div class="glsm ci-sm">
+            <div class="cv-sm">${this.fmt(humidity,"","--",0)}<span class="cu-sm">%</span></div>
+            <div class="cl-sm">Humidity</div>
+          </div>
+        </div>
+        <div class="glsm aq-badge">
+          <div class="aq-pulse" style="background:${aqc};box-shadow:0 0 10px ${aqc}55"></div>
+          <div class="aq-val" style="color:${aqc}">${aqv}</div>
+          <div class="aq-lbl">Air Quality</div>
+        </div>
       </div>
     </section>`;
   }
 
-  day(label, state, high, low) {
-    return `<div class="glsm wxd">
-      <div class="wxdn">${label}</div>
-      <ha-icon class="wxdi" icon="${this.weatherIcon(state)}"></ha-icon>
-      <div class="wxdh">${high}</div>
-      <div class="wxdl">${low}</div>
-    </div>`;
-  }
+  weatherSection(state, temp, humidity, wind, feels, uv, vis) {
+    const days = (this._forecast || []).slice(0, 5);
+    const forecastHTML = days.length
+      ? days.map(d => {
+          const dt    = new Date(d.datetime);
+          const label = dt.toLocaleDateString([], { weekday: "short" });
+          const high  = Math.round(d.temperature);
+          const low   = Math.round(d.templow ?? d.temperature - 4);
+          return `<div class="glsm wx-day">
+            <div class="wxdn">${label}</div>
+            <ha-icon class="wxdi" icon="${this.weatherIcon(d.condition || state)}"></ha-icon>
+            <div class="wxdh">${high}°</div>
+            <div class="wxdl">${low}°</div>
+          </div>`;
+        }).join("")
+      : `<div class="wx-nof">Forecast loading…</div>`;
 
-  forecastDays(weatherState) {
-    const days = (this._forecast || []).slice(0, 3);
-    if (!days.length) {
-      return [
-        this.day("Now",  weatherState, `${this.attr(this.entities.weather, "temperature", "--")}°`, ""),
-        this.day("Hum",  weatherState, `${this.attr(this.entities.weather, "humidity", "--")}%`, ""),
-        this.day("Wind", weatherState, `${this.attr(this.entities.weather, "wind_speed", "--")}`, "km/h"),
-      ].join("");
-    }
-    return days.map((d) => {
-      const date  = new Date(d.datetime);
-      const label = date.toLocaleDateString([], { weekday: "short" });
-      return this.day(label, d.condition || weatherState, `${Math.round(d.temperature)}°`, `${Math.round(d.templow)}°`);
-    }).join("");
+    const extras = [
+      feels !== null ? { icon:"mdi:thermometer-lines", val:`${Math.round(feels)}°`, lbl:"Feels like" } : null,
+      uv    !== null ? { icon:"mdi:white-balance-sunny", val:String(uv), lbl:"UV index" } : null,
+      vis   !== null ? { icon:"mdi:eye-outline", val:`${Math.round(vis)} km`, lbl:"Visibility" } : null,
+    ].filter(Boolean);
+
+    return `<section class="gl wx-big">
+      <div class="slbl">Weather · Outside</div>
+      <div class="wx-hero">
+        <div class="wx-hero-left">
+          <ha-icon class="wx-ico-big" icon="${this.weatherIcon(state)}"></ha-icon>
+          <div>
+            <div class="wx-tmp-big">${temp}<span>°C</span></div>
+            <div class="wx-cond-big">${state.replace(/-/g," ")}</div>
+          </div>
+        </div>
+        <div class="wx-details">
+          <div class="wx-det"><ha-icon icon="mdi:water-percent"></ha-icon><div class="wx-det-val">${humidity}%</div><div class="wx-det-lbl">Humidity</div></div>
+          <div class="wx-det"><ha-icon icon="mdi:weather-windy"></ha-icon><div class="wx-det-val">${wind}</div><div class="wx-det-lbl">km/h Wind</div></div>
+          ${extras.map(x => `<div class="wx-det"><ha-icon icon="${x.icon}"></ha-icon><div class="wx-det-val">${x.val}</div><div class="wx-det-lbl">${x.lbl}</div></div>`).join("")}
+        </div>
+      </div>
+      <div class="wx-sep"></div>
+      <div class="wx-forecast">${forecastHTML}</div>
+    </section>`;
   }
 
   teslaButton(action, icon, label, on) {
@@ -475,7 +529,7 @@ class GlassDashboardCard extends HTMLElement {
           </section>
           <section class="gl block">
             <div class="slbl">Lights</div>
-            <div class="light-list">${entities.map((en) => this.lightItem(en)).join("")}</div>
+            <div class="light-list">${entities.map(en => this.lightItem(en)).join("")}</div>
           </section>
         </div>
         ${climate}
@@ -503,12 +557,17 @@ class GlassDashboardCard extends HTMLElement {
   }
 
   climateDetail(temp, humidity, air) {
+    const aqv = this.st(air, "Good");
+    const aqc = this.aqColor(aqv);
     return `<section class="gl block">
       <div class="slbl">Climate</div>
       <div class="clim-detail">
         <div class="glsm cd"><div class="cd-val">${this.fmt(temp,"","--",0)}<span class="cd-unit">°C</span></div><div class="cd-lbl">Temperature</div></div>
         <div class="glsm cd"><div class="cd-val">${this.fmt(humidity,"","--",0)}<span class="cd-unit">%</span></div><div class="cd-lbl">Humidity</div></div>
-        <div class="glsm cd-full"><div>Air Quality</div><div class="cd-aq-val">${this.st(air,"Good")}</div></div>
+        <div class="glsm cd-full" style="border-color:${aqc}22">
+          <div style="color:rgba(255,255,255,.38);font-size:9px">Air Quality</div>
+          <div class="cd-aq-val" style="color:${aqc}">${aqv}</div>
+        </div>
       </div>
     </section>`;
   }
@@ -521,10 +580,9 @@ class GlassDashboardCard extends HTMLElement {
     </section>`;
   }
 
-  toonPage() {
-    const e        = this.entities;
+  toonPage(camUrl) {
+    const e = this.entities;
     const feederOn = this.anyOn(e.toonDevices);
-    const camUrl   = `/api/camera_proxy/${e.petFeederCamera}?t=${Date.now()}`;
     return `<div class="page ${this._tab === "toon" ? "active" : ""} z1">
       <div class="g2">
         <div class="col">
@@ -534,53 +592,35 @@ class GlassDashboardCard extends HTMLElement {
             <div class="rp-sub">Pet feeder · Litter box</div>
             <div class="pet-status ${feederOn ? "on" : ""}">
               <ha-icon icon="mdi:food-drumstick-outline"></ha-icon>
-              <div>
-                <b>${feederOn ? "Active" : "Standby"}</b>
-                <span>Feeder controls and monitoring</span>
-              </div>
+              <div><b>${feederOn ? "Active" : "Standby"}</b><span>Feeder controls and monitoring</span></div>
             </div>
           </section>
           <section class="gl block">
             <div class="slbl">Pet Feeder</div>
-            <div class="light-list">${e.toonDevices.map((en) => this.lightItem(en)).join("")}</div>
+            <div class="light-list">${e.toonDevices.map(en => this.lightItem(en)).join("")}</div>
           </section>
         </div>
-
         <div class="col">
           <section class="gl block cam-section">
             <div class="slbl-row">
               <div class="slbl" style="margin:0">Pet Feeder Camera</div>
-              <button class="cam-btn" data-action="cam-refresh">
-                <ha-icon icon="mdi:refresh"></ha-icon>
-              </button>
+              <button class="cam-btn" data-action="cam-refresh"><ha-icon icon="mdi:refresh"></ha-icon></button>
             </div>
             <div class="cam-wrap">
-              <img class="cam-feed"
-                   src="${camUrl}"
-                   alt="Pet Feeder Camera"
+              <img class="cam-feed" src="${camUrl}" alt="Pet Feeder Camera"
                    onerror="this.style.display='none';this.nextElementSibling.style.display='flex'">
               <div class="cam-err" style="display:none">
                 <ha-icon icon="mdi:cctv-off"></ha-icon>
-                <span>Camera unavailable<br><small>Verify: ${e.petFeederCamera}</small></span>
+                <span>Camera unavailable<br><small>Verify entity: ${e.petFeederCamera}</small></span>
               </div>
             </div>
           </section>
-
           <section class="gl block">
             <div class="slbl">Litter Box</div>
             <div class="clim-detail">
-              <div class="glsm cd">
-                <div class="cd-val">${this.fmt(e.toonSensors[0],"","--",0)}<span class="cd-unit">g</span></div>
-                <div class="cd-lbl">Cat Weight</div>
-              </div>
-              <div class="glsm cd">
-                <div class="cd-val">${this.fmt(e.toonSensors[2],"","--",0)}</div>
-                <div class="cd-lbl">Visits Today</div>
-              </div>
-              <div class="glsm cd-full">
-                <div>Last duration</div>
-                <div class="cd-aq-val">${this.fmt(e.toonSensors[1],"s","--",0)}</div>
-              </div>
+              <div class="glsm cd"><div class="cd-val">${this.fmt(e.toonSensors[0],"","--",0)}<span class="cd-unit">g</span></div><div class="cd-lbl">Cat Weight</div></div>
+              <div class="glsm cd"><div class="cd-val">${this.fmt(e.toonSensors[2],"","--",0)}</div><div class="cd-lbl">Visits Today</div></div>
+              <div class="glsm cd-full"><div>Last duration</div><div class="cd-aq-val">${this.fmt(e.toonSensors[1],"s","--",0)}</div></div>
             </div>
           </section>
         </div>
@@ -588,26 +628,25 @@ class GlassDashboardCard extends HTMLElement {
     </div>`;
   }
 
-  css() {
-    return `
+  css() { return `
 :host{display:block}
 ha-card{background:transparent;border:0;box-shadow:none;overflow:visible}
 *{box-sizing:border-box;margin:0;padding:0}
-button{font:inherit;color:inherit;border:0;text-align:inherit}
+button{font:inherit;color:inherit;border:0;text-align:inherit;cursor:pointer}
 
-/* ── Shell ─────────────────────────────────────────────────────────────────── */
+/* Shell */
 .dash{width:100%;max-width:1240px;margin:0 auto;min-height:700px;border-radius:16px;overflow:hidden;display:flex;flex-direction:column;font-family:-apple-system,BlinkMacSystemFont,"SF Pro Display",system-ui,sans-serif;position:relative;background:#060818}
 .bg{position:absolute;inset:0;background:radial-gradient(ellipse 80% 60% at 15% 85%,rgba(0,180,255,.42) 0%,transparent 55%),radial-gradient(ellipse 60% 50% at 80% 10%,rgba(130,60,255,.38) 0%,transparent 55%),radial-gradient(ellipse 50% 40% at 50% 50%,rgba(30,10,80,.8) 0%,transparent 70%),linear-gradient(160deg,#06091c 0%,#0b0630 40%,#050c1e 100%);pointer-events:none}
 .bg::after{content:"";position:absolute;inset:0;background:radial-gradient(ellipse 30% 20% at 10% 70%,rgba(0,220,255,.22) 0%,transparent 50%)}
 .z1{position:relative;z-index:1}
 
-/* ── Glass atoms ─────────────────────────────────────────────────────────────*/
+/* Glass atoms */
 .gl{background:rgba(255,255,255,.07);border:1px solid rgba(255,255,255,.13);backdrop-filter:blur(24px);-webkit-backdrop-filter:blur(24px);border-radius:14px}
 .glsm{background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.08);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);border-radius:10px}
 .slbl{font-size:8px;font-weight:700;color:rgba(255,255,255,.38);letter-spacing:1.1px;text-transform:uppercase;margin-bottom:6px}
 .block{padding:8px}
 
-/* ── Topbar ──────────────────────────────────────────────────────────────────*/
+/* Topbar */
 .topbar{display:flex;align-items:center;justify-content:space-between;padding:8px 14px 5px}
 .home-lbl{font-size:10px;font-weight:700;color:rgba(255,255,255,.55);letter-spacing:1.4px;text-transform:uppercase}
 .home-sub{font-size:8.5px;color:rgba(255,255,255,.32);margin-top:1px}
@@ -615,25 +654,39 @@ button{font:inherit;color:inherit;border:0;text-align:inherit}
 .clk-time{font-size:18px;font-weight:200;color:rgba(255,255,255,.92);letter-spacing:-1px;line-height:1}
 .clk-date{font-size:9.5px;color:rgba(255,255,255,.5);margin-top:1px}
 
-/* ── Tabs ────────────────────────────────────────────────────────────────────*/
+/* Tabs */
 .tabs{display:flex;gap:3px;padding:0 10px 6px;overflow-x:auto;scrollbar-width:none}
 .tabs::-webkit-scrollbar{display:none}
-.tab{flex-shrink:0;display:flex;align-items:center;gap:5px;padding:5px 9px;border-radius:20px;font-size:10px;font-weight:700;color:rgba(255,255,255,.48);cursor:pointer;border:1px solid rgba(255,255,255,.06);background:rgba(255,255,255,.05);transition:all .18s;white-space:nowrap}
+.tab{flex-shrink:0;display:flex;align-items:center;gap:5px;padding:5px 9px;border-radius:20px;font-size:10px;font-weight:700;color:rgba(255,255,255,.48);border:1px solid rgba(255,255,255,.06);background:rgba(255,255,255,.05);transition:all .18s, transform .08s;white-space:nowrap}
 .tab ha-icon{--mdc-icon-size:12px;opacity:.7}
-.tab:hover{color:rgba(255,255,255,.70);background:rgba(255,255,255,.09);border-color:rgba(255,255,255,.11)}
+.tab:hover{color:rgba(255,255,255,.70);background:rgba(255,255,255,.09)}
 .tab.active{background:rgba(255,255,255,.15);border-color:rgba(255,255,255,.28);color:rgba(255,255,255,.96)}
 .tab.active ha-icon{opacity:1}
 .divider{height:1px;background:rgba(255,255,255,.07);margin:0 10px}
 
-/* ── Page / grid ─────────────────────────────────────────────────────────────*/
-.page{display:none;flex:1;padding:7px 9px 9px}
+/* Page / grid */
+.page{display:none;flex:1;padding:7px 9px 9px;flex-direction:column}
 .page.active{display:flex}
+.page-ov{gap:7px}
+.ov-main{display:grid;grid-template-columns:1fr 1fr;gap:7px}
 .g2{display:grid;grid-template-columns:1fr 1fr;gap:7px;width:100%}
 .col{display:flex;flex-direction:column;gap:6px;min-width:0}
 
-/* ── Room buttons ────────────────────────────────────────────────────────────*/
+/* Pressed / active state */
+button{transition:transform .08s ease, filter .08s ease, box-shadow .1s}
+button.is-pressed{transform:scale(.95)!important;filter:brightness(1.18)}
+.tb.is-pressed{box-shadow:0 0 12px rgba(167,139,250,.45)!important}
+.tb.on.is-pressed{box-shadow:0 0 18px rgba(167,139,250,.65)!important}
+.room.is-pressed{box-shadow:0 0 10px rgba(167,139,250,.3)!important}
+.room.on.is-pressed{box-shadow:0 0 14px rgba(167,139,250,.5)!important}
+.light-item.is-pressed{transform:scale(.98)!important}
+.big-toggle.is-pressed{transform:scale(.99)!important}
+.sp-play.is-pressed{box-shadow:0 0 14px rgba(29,185,84,.55)!important}
+.sp-btn.is-pressed{transform:scale(.88)!important}
+
+/* Room buttons */
 .rooms5{display:grid;grid-template-columns:repeat(5,1fr);gap:4px}
-.room{padding:8px 4px 7px;cursor:pointer;transition:all .18s;position:relative;border-radius:12px;text-align:center}
+.room{padding:8px 4px 7px;transition:all .18s, transform .08s;position:relative;border-radius:12px;text-align:center}
 .room:hover{background:rgba(255,255,255,.09)}
 .room.on{background:rgba(255,255,255,.11);border-color:rgba(200,180,255,.2)}
 .ri{--mdc-icon-size:15px;color:rgba(255,255,255,.42);margin:0 auto 3px;transition:color .18s;display:block}
@@ -645,31 +698,24 @@ button{font:inherit;color:inherit;border:0;text-align:inherit}
 .alloff .rdot{background:rgba(248,113,113,.35)}
 .alloff .ri{color:rgba(248,113,113,.55)}
 
-/* ── Climate summary ─────────────────────────────────────────────────────────*/
-.clim3{display:grid;grid-template-columns:repeat(3,1fr);gap:4px}
-.ci{text-align:center;padding:7px 4px}
-.cv{font-size:15px;font-weight:300;color:rgba(255,255,255,.96);letter-spacing:-1px;line-height:1}
-.cu{font-size:8px;color:rgba(255,255,255,.52)}
-.cl{font-size:7px;color:rgba(255,255,255,.42);margin-top:2px;text-transform:uppercase;letter-spacing:.5px}
-.cgood{font-size:10px;font-weight:700;color:#7fffd4;padding-top:2px;text-transform:capitalize}
+/* Climate summary (split layout with prominent AQ) */
+.clim-split{display:grid;grid-template-columns:auto 1fr;gap:5px}
+.clim-left{display:flex;flex-direction:column;gap:4px}
+.ci-sm{padding:5px 8px;text-align:center;min-width:58px}
+.cv-sm{font-size:14px;font-weight:300;color:rgba(255,255,255,.96);letter-spacing:-0.5px;line-height:1}
+.cu-sm{font-size:8px;color:rgba(255,255,255,.52)}
+.cl-sm{font-size:7px;color:rgba(255,255,255,.42);margin-top:2px;text-transform:uppercase;letter-spacing:.5px}
+.aq-badge{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;padding:8px}
+.aq-pulse{width:9px;height:9px;border-radius:50%;flex-shrink:0;animation:aq-breathe 2.5s ease-in-out infinite}
+@keyframes aq-breathe{0%,100%{opacity:1;transform:scale(1)}50%{opacity:.65;transform:scale(0.85)}}
+.aq-val{font-size:14px;font-weight:800;text-transform:capitalize;line-height:1}
+.aq-lbl{font-size:7px;color:rgba(255,255,255,.38);text-transform:uppercase;letter-spacing:.8px}
 
-/* ── Tesla card ──────────────────────────────────────────────────────────────*/
+/* Tesla */
 .tesla-card{overflow:hidden}
-.car-area{
-  width:100%;height:110px;position:relative;overflow:hidden;
-  background:radial-gradient(ellipse 90% 70% at 50% 60%,rgba(25,25,55,.95) 0%,rgba(8,8,25,.98) 100%);
-  border-radius:12px 12px 0 0;
-  display:flex;align-items:center;justify-content:center;
-}
+.car-area{width:100%;height:110px;position:relative;overflow:hidden;background:radial-gradient(ellipse 90% 70% at 50% 60%,rgba(25,25,55,.95) 0%,rgba(8,8,25,.98) 100%);border-radius:12px 12px 0 0;display:flex;align-items:center;justify-content:center}
 .car-glow{position:absolute;bottom:0;left:0;right:0;height:35px;background:radial-gradient(ellipse 80% 100% at 50% 100%,rgba(80,100,220,.18) 0%,transparent 70%)}
-.car-img{
-  width:100%;height:100%;
-  object-fit:contain;
-  object-position:center 60%;
-  filter:drop-shadow(0 10px 16px rgba(0,0,0,.5));
-  user-select:none;pointer-events:none;
-  position:relative;z-index:1;
-}
+.car-img{width:100%;height:100%;object-fit:contain;object-position:center 60%;filter:drop-shadow(0 10px 16px rgba(0,0,0,.5));user-select:none;pointer-events:none;position:relative;z-index:1}
 .tesla-stats{padding:7px 10px 8px}
 .tesla-hdr{display:flex;justify-content:space-between;align-items:center;margin-bottom:5px}
 .tesla-name{font-size:12px;font-weight:700;color:rgba(255,255,255,.9)}
@@ -682,64 +728,74 @@ button{font:inherit;color:inherit;border:0;text-align:inherit}
 .bbar{height:3px;background:rgba(255,255,255,.14);border-radius:2px;margin-bottom:7px}
 .bfill{height:100%;border-radius:2px;background:linear-gradient(90deg,#34d399,#86efac)}
 .tbtns{display:grid;grid-template-columns:repeat(5,1fr);gap:4px}
-.tb{padding:6px 3px;text-align:center;cursor:pointer;transition:all .18s;border-radius:8px;border:1px solid rgba(255,255,255,.1);background:rgba(255,255,255,.06)}
+.tb{padding:6px 3px;text-align:center;transition:all .18s, transform .08s;border-radius:8px;border:1px solid rgba(255,255,255,.1);background:rgba(255,255,255,.06)}
 .tb:hover{background:rgba(255,255,255,.09)}
-.tb.on{background:rgba(167,139,250,.15);border-color:rgba(167,139,250,.28)}
+.tb.on{background:rgba(167,139,250,.15);border-color:rgba(167,139,250,.4);box-shadow:0 0 8px rgba(167,139,250,.2)}
 .tb ha-icon{display:block;--mdc-icon-size:13px;color:rgba(255,255,255,.5);margin:0 auto 2px}
 .tb.on ha-icon{color:#c4b5fd}
 .tb span{font-size:7px;color:rgba(255,255,255,.44);text-transform:uppercase;letter-spacing:.3px;font-weight:700}
+.tb.on span{color:rgba(200,185,255,.8)}
 
-/* ── Weather ─────────────────────────────────────────────────────────────────*/
-.wx-main{display:flex;align-items:center;gap:8px;margin-bottom:7px}
-.wx-ico{--mdc-icon-size:20px;color:rgba(255,255,255,.62)}
-.wx-tmp{font-size:18px;font-weight:300;color:rgba(255,255,255,.94);letter-spacing:-1px}
-.wx-tmp span{font-size:10px;color:rgba(255,255,255,.5)}
-.wx-cond{font-size:7.5px;color:rgba(255,255,255,.52);margin-top:1px;text-transform:uppercase;letter-spacing:.5px}
-.wx-days{display:grid;grid-template-columns:repeat(3,1fr);gap:4px}
-.wxd{text-align:center;padding:5px 3px}
-.wxdn{font-size:7px;color:rgba(255,255,255,.46);text-transform:uppercase;letter-spacing:.4px;margin-bottom:2px}
-.wxdi{--mdc-icon-size:12px;color:rgba(255,255,255,.58);margin-bottom:2px}
-.wxdh{font-size:10px;color:rgba(255,255,255,.76)}
-.wxdl{font-size:8px;color:rgba(255,255,255,.42);margin-top:1px}
+/* Weather big */
+.wx-big{padding:10px 12px}
+.wx-hero{display:flex;align-items:center;gap:16px;margin-bottom:10px}
+.wx-hero-left{display:flex;align-items:center;gap:10px;flex-shrink:0}
+.wx-ico-big{--mdc-icon-size:38px;color:rgba(255,255,255,.75)}
+.wx-tmp-big{font-size:30px;font-weight:200;color:rgba(255,255,255,.96);letter-spacing:-1.5px;line-height:1}
+.wx-tmp-big span{font-size:14px;color:rgba(255,255,255,.5)}
+.wx-cond-big{font-size:9px;color:rgba(255,255,255,.5);margin-top:3px;text-transform:capitalize;letter-spacing:.3px}
+.wx-details{display:flex;gap:6px;flex-wrap:wrap;flex:1}
+.wx-det{display:flex;flex-direction:column;align-items:center;gap:2px;min-width:52px;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.08);border-radius:9px;padding:6px 8px;flex:1}
+.wx-det ha-icon{--mdc-icon-size:14px;color:rgba(255,255,255,.5)}
+.wx-det-val{font-size:12px;font-weight:600;color:rgba(255,255,255,.86)}
+.wx-det-lbl{font-size:7px;color:rgba(255,255,255,.4);text-transform:uppercase;letter-spacing:.4px;text-align:center}
+.wx-sep{height:1px;background:rgba(255,255,255,.08);margin:8px 0}
+.wx-forecast{display:grid;grid-template-columns:repeat(5,1fr);gap:5px}
+.wx-nof{color:rgba(255,255,255,.28);font-size:9px;padding:8px;text-align:center}
+.wx-day{text-align:center;padding:7px 4px}
+.wxdn{font-size:7.5px;color:rgba(255,255,255,.46);text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px}
+.wxdi{--mdc-icon-size:16px;color:rgba(255,255,255,.62);margin-bottom:3px;display:block}
+.wxdh{font-size:11px;font-weight:600;color:rgba(255,255,255,.82)}
+.wxdl{font-size:9px;color:rgba(255,255,255,.4);margin-top:2px}
 
-/* ── Spotify Player ─────────────────────────────────────────────────────────*/
+/* Spotify */
 .sp2{padding:9px 10px;display:flex;gap:10px;align-items:flex-start}
-.sp-art{width:74px;height:74px;border-radius:8px;object-fit:cover;flex-shrink:0;border:1px solid rgba(255,255,255,.12)}
-.sp-art-empty{width:74px;height:74px;border-radius:8px;flex-shrink:0;background:linear-gradient(145deg,rgba(29,185,84,.25),rgba(29,185,84,.06));border:1px solid rgba(29,185,84,.3);display:flex;align-items:center;justify-content:center}
-.sp-art-empty ha-icon{--mdc-icon-size:32px;color:#1DB954}
+.sp-art{width:72px;height:72px;border-radius:8px;object-fit:cover;flex-shrink:0;border:1px solid rgba(255,255,255,.12)}
+.sp-art-empty{width:72px;height:72px;border-radius:8px;flex-shrink:0;background:linear-gradient(145deg,rgba(29,185,84,.25),rgba(29,185,84,.06));border:1px solid rgba(29,185,84,.3);display:flex;align-items:center;justify-content:center}
+.sp-art-empty ha-icon{--mdc-icon-size:30px;color:#1DB954}
 .sp-body{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px}
 .sp-track{font-size:12px;font-weight:800;color:rgba(255,255,255,.92);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;line-height:1.2}
 .sp-artist{font-size:9px;color:rgba(255,255,255,.55);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.sp-album{font-size:8px;color:rgba(255,255,255,.35);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-bottom:1px}
-.sp-prog-wrap{margin-top:4px}
-.sp-prog-bar{height:3px;border-radius:3px;background:rgba(255,255,255,.14);overflow:hidden;cursor:default}
+.sp-album{font-size:7.5px;color:rgba(255,255,255,.32);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.sp-prog-wrap{margin-top:5px}
+.sp-prog-bar{height:3px;border-radius:3px;background:rgba(255,255,255,.12);overflow:hidden}
 .sp-prog-fill{height:100%;border-radius:3px;background:#1DB954;transition:width .5s linear}
-.sp-times{display:flex;justify-content:space-between;font-size:7.5px;color:rgba(255,255,255,.35);margin-top:2px}
-.sp-ctrl-row{display:flex;align-items:center;gap:4px;margin-top:4px}
-.sp-btn{background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.1);border-radius:7px;padding:4px 7px;cursor:pointer;display:flex;align-items:center;justify-content:center;transition:all .15s;color:rgba(255,255,255,.7)}
+.sp-times{display:flex;justify-content:space-between;font-size:7px;color:rgba(255,255,255,.32);margin-top:2px}
+.sp-ctrl-row{display:flex;align-items:center;gap:4px;margin-top:5px}
+.sp-btn{background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.1);border-radius:7px;padding:4px 7px;display:flex;align-items:center;justify-content:center;transition:all .15s, transform .08s}
 .sp-btn:hover{background:rgba(255,255,255,.14);color:#fff}
-.sp-btn ha-icon{--mdc-icon-size:14px}
-.sp-play{background:rgba(29,185,84,.2);border-color:rgba(29,185,84,.35);color:#1DB954;padding:5px 9px}
-.sp-play:hover{background:rgba(29,185,84,.3);color:#1DB954}
-.sp-play ha-icon{--mdc-icon-size:15px}
+.sp-btn ha-icon{--mdc-icon-size:14px;color:rgba(255,255,255,.7)}
+.sp-play{background:rgba(29,185,84,.18);border-color:rgba(29,185,84,.38);padding:5px 10px}
+.sp-play:hover{background:rgba(29,185,84,.28)}
+.sp-play ha-icon{--mdc-icon-size:15px;color:#1DB954}
 .sp-sm ha-icon{--mdc-icon-size:11px}
 .sp-vol-group{display:flex;align-items:center;gap:2px;margin-left:auto}
-.sp-vol-lbl{font-size:8px;color:rgba(255,255,255,.45);min-width:24px;text-align:center}
+.sp-vol-lbl{font-size:8px;color:rgba(255,255,255,.42);min-width:24px;text-align:center}
 
-/* ── Media strip ─────────────────────────────────────────────────────────────*/
+/* Media strip */
 .media-strip{padding:7px 10px;display:grid;grid-template-columns:1fr 1fr;gap:6px}
 .media-item{display:flex;align-items:center;gap:6px;min-width:0}
 .media-item ha-icon{--mdc-icon-size:16px;color:rgba(255,255,255,.68)}
 .media-item b{display:block;font-size:9px;color:rgba(255,255,255,.86);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .media-item span{display:block;font-size:7.5px;color:rgba(255,255,255,.52);margin-top:1px}
 
-/* ── Room pages ──────────────────────────────────────────────────────────────*/
+/* Room pages */
 .rp-hero{padding:10px}
 .rp-title{font-size:16px;font-weight:200;color:rgba(255,255,255,.85);margin-bottom:1px;letter-spacing:-.5px}
 .rp-sub{font-size:8.5px;color:rgba(255,255,255,.25)}
-.big-toggle{width:100%;display:flex;align-items:center;justify-content:space-between;margin-top:8px;padding:9px 11px;border-radius:11px;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.09);cursor:pointer;transition:all .18s}
+.big-toggle{width:100%;display:flex;align-items:center;justify-content:space-between;margin-top:8px;padding:9px 11px;border-radius:11px;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.09);transition:all .18s, transform .08s}
 .big-toggle:hover{background:rgba(255,255,255,.09)}
-.big-toggle.on{background:rgba(167,139,250,.13);border-color:rgba(167,139,250,.24)}
+.big-toggle.on{background:rgba(167,139,250,.13);border-color:rgba(167,139,250,.3);box-shadow:0 0 12px rgba(167,139,250,.15)}
 .bt-label{font-size:10px;font-weight:600;color:rgba(255,255,255,.48)}
 .big-toggle.on .bt-label{color:rgba(200,185,255,.85)}
 .sw{width:32px;height:17px;border-radius:9px;background:rgba(255,255,255,.12);position:relative;transition:background .2s}
@@ -747,33 +803,33 @@ button{font:inherit;color:inherit;border:0;text-align:inherit}
 .big-toggle.on .sw{background:#7c3aed}
 .big-toggle.on .sw::after{left:18px;background:#fff}
 
-/* ── Light list ──────────────────────────────────────────────────────────────*/
+/* Light list */
 .light-list{display:flex;flex-direction:column;gap:4px}
-.light-item{width:100%;display:flex;align-items:center;justify-content:space-between;padding:6px 9px;border-radius:9px;cursor:pointer;border:1px solid rgba(255,255,255,.1);background:rgba(255,255,255,.06);transition:all .18s}
+.light-item{width:100%;display:flex;align-items:center;justify-content:space-between;padding:6px 9px;border-radius:9px;border:1px solid rgba(255,255,255,.1);background:rgba(255,255,255,.06);transition:all .18s, transform .08s}
 .light-item:hover{background:rgba(255,255,255,.09)}
-.light-item.on{background:rgba(167,139,250,.14);border-color:rgba(167,139,250,.3)}
+.light-item.on{background:rgba(167,139,250,.13);border-color:rgba(167,139,250,.3);box-shadow:0 0 6px rgba(167,139,250,.12)}
 .li-left{display:flex;align-items:center;gap:7px;min-width:0}
 .li-ico{--mdc-icon-size:13px;color:rgba(255,255,255,.5)}
-.light-item.on .li-ico{color:rgba(230,220,255,.94)}
+.light-item.on .li-ico{color:rgba(220,210,255,.94)}
 .li-name{font-size:9.5px;font-weight:700;color:rgba(255,255,255,.7);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:220px}
 .light-item.on .li-name{color:rgba(255,255,255,.94)}
 .li-sub{font-size:7px;color:rgba(255,255,255,.4);margin-top:1px}
-.lisw{width:26px;height:14px;border-radius:7px;background:rgba(255,255,255,.1);position:relative;flex-shrink:0}
+.lisw{width:26px;height:14px;border-radius:7px;background:rgba(255,255,255,.1);position:relative;flex-shrink:0;transition:background .2s}
 .lisw::after{content:"";position:absolute;top:2px;left:2px;width:10px;height:10px;border-radius:50%;background:rgba(255,255,255,.35);transition:all .2s}
 .light-item.on .lisw{background:#7c3aed}
 .light-item.on .lisw::after{left:14px;background:#fff}
 
-/* ── Climate detail ──────────────────────────────────────────────────────────*/
+/* Climate detail */
 .clim-detail{display:grid;grid-template-columns:1fr 1fr;gap:5px}
 .cd{padding:8px;text-align:center}
 .cd-val{font-size:18px;font-weight:200;color:rgba(255,255,255,.85);letter-spacing:-1px;line-height:1}
 .cd-unit{font-size:9px;color:rgba(255,255,255,.28)}
 .cd-lbl{font-size:7px;color:rgba(255,255,255,.24);margin-top:2px;text-transform:uppercase;letter-spacing:.6px}
-.cd-full{grid-column:span 2;padding:7px 10px;display:flex;align-items:center;justify-content:space-between;color:rgba(255,255,255,.38);font-size:9px}
-.cd-aq-val{font-size:11px;font-weight:700;color:#6ee7b7;text-transform:capitalize}
+.cd-full{grid-column:span 2;padding:7px 10px;display:flex;align-items:center;justify-content:space-between;color:rgba(255,255,255,.38);font-size:9px;border-radius:10px}
+.cd-aq-val{font-size:12px;font-weight:700;text-transform:capitalize}
 
-/* ── Scenes ──────────────────────────────────────────────────────────────────*/
-.scene-item{width:100%;display:flex;align-items:center;justify-content:space-between;padding:7px 10px;border-radius:9px;cursor:pointer;border:1px solid rgba(255,255,255,.07);background:rgba(255,255,255,.04);transition:all .18s;margin-bottom:4px}
+/* Scenes */
+.scene-item{width:100%;display:flex;align-items:center;justify-content:space-between;padding:7px 10px;border-radius:9px;border:1px solid rgba(255,255,255,.07);background:rgba(255,255,255,.04);transition:all .18s;margin-bottom:4px}
 .scene-item:hover{background:rgba(255,255,255,.07)}
 .sc-left{display:flex;align-items:center;gap:7px}
 .sc-ico{--mdc-icon-size:13px;color:rgba(255,255,255,.24)}
@@ -781,39 +837,37 @@ button{font:inherit;color:inherit;border:0;text-align:inherit}
 .sc-sub{font-size:7px;color:rgba(255,255,255,.18);margin-top:1px}
 .chev{--mdc-icon-size:12px;color:rgba(255,255,255,.16)}
 
-/* ── Toon's Room / Camera ────────────────────────────────────────────────────*/
+/* Toon camera */
 .pet-status{display:flex;align-items:center;gap:9px;margin-top:8px;padding:8px 10px;border-radius:10px;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.1)}
 .pet-status.on{background:rgba(167,139,250,.13);border-color:rgba(167,139,250,.28)}
 .pet-status ha-icon{--mdc-icon-size:20px;color:rgba(255,255,255,.68)}
 .pet-status b{display:block;font-size:10px;color:rgba(255,255,255,.88)}
 .pet-status span{display:block;font-size:8px;color:rgba(255,255,255,.5);margin-top:1px}
-
 .cam-section{overflow:hidden}
 .slbl-row{display:flex;align-items:center;justify-content:space-between;margin-bottom:7px}
-.cam-btn{background:rgba(255,255,255,.07);border:1px solid rgba(255,255,255,.12);border-radius:7px;padding:4px 6px;cursor:pointer;display:flex;align-items:center}
+.cam-btn{background:rgba(255,255,255,.07);border:1px solid rgba(255,255,255,.12);border-radius:7px;padding:4px 6px;display:flex;align-items:center}
 .cam-btn ha-icon{--mdc-icon-size:12px;color:rgba(255,255,255,.5)}
 .cam-btn:hover{background:rgba(255,255,255,.12)}
-.cam-wrap{border-radius:9px;overflow:hidden;background:rgba(0,0,0,.35);min-height:130px;display:flex;align-items:center;justify-content:center}
+.cam-wrap{border-radius:9px;overflow:hidden;background:rgba(0,0,0,.35);min-height:120px;display:flex;align-items:center;justify-content:center}
 .cam-feed{width:100%;height:auto;display:block;border-radius:9px}
-.cam-err{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:7px;padding:20px;color:rgba(255,255,255,.3);font-size:9px;text-align:center;min-height:130px}
-.cam-err ha-icon{--mdc-icon-size:26px}
-.cam-err small{font-size:7.5px;opacity:.7;margin-top:1px}
+.cam-err{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:7px;padding:20px;color:rgba(255,255,255,.3);font-size:9px;text-align:center;min-height:120px}
+.cam-err ha-icon{--mdc-icon-size:24px}
+.cam-err small{font-size:7.5px;opacity:.7}
 
-/* ── Responsive ──────────────────────────────────────────────────────────────*/
+/* Responsive */
 @media(max-width:820px){
   .dash{min-height:calc(100vh - 80px);border-radius:0}
-  .g2{grid-template-columns:1fr}
+  .ov-main,.g2{grid-template-columns:1fr}
   .rooms5{grid-template-columns:repeat(3,1fr)}
   .car-area{height:95px}
   .page{padding:6px}
   .tab{padding:5px 8px}
-  .weather{order:10}
+  .wx-forecast{grid-template-columns:repeat(3,1fr)}
   .media-strip{grid-template-columns:1fr}
   .sp2{flex-direction:column}
-  .sp-art,.sp-art-empty{width:100%;height:100px}
+  .sp-art,.sp-art-empty{width:100%;height:90px;border-radius:8px}
 }
-`;
-  }
+`; }
 }
 
 customElements.define("glass-dashboard-card", GlassDashboardCard);
