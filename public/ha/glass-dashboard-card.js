@@ -316,29 +316,45 @@ class GlassDashboardCard extends HTMLElement {
       t: s.last_changed ? new Date(s.last_changed).getTime() : (s.lu ? s.lu * 1000 : 0),
     })).filter(p => Number.isFinite(p.v) && p.t > 0);
     if (pts.length < 3) return `<div class="spark-empty"></div>`;
-    const step = Math.max(1, Math.floor(pts.length / 50));
+    // Downsample to ≤60 points for smooth rendering
+    const step = Math.max(1, Math.floor(pts.length / 60));
     const dp = pts.filter((_,i) => i % step === 0 || i === pts.length-1);
     const W = 200, H = 32;
     const minV = Math.min(...dp.map(p=>p.v)), maxV = Math.max(...dp.map(p=>p.v));
-    // Add 10% padding so flat lines show in the middle, not squished to edge
     const pad = Math.max((maxV - minV) * 0.15, 0.2);
     const lo = minV - pad, hi = maxV + pad, rng = hi - lo;
     const minT = dp[0].t, maxT = dp[dp.length-1].t;
     const tRng = maxT - minT || 1;
     const coords = dp.map(p => [
-      ((p.t - minT) / tRng * W).toFixed(1),
-      (H - 2 - (p.v - lo) / rng * (H - 6)).toFixed(1),
+      (p.t - minT) / tRng * W,
+      H - 2 - (p.v - lo) / rng * (H - 6),
     ]);
-    const line = coords.map(c=>c.join(",")).join(" ");
-    const area = `M${coords[0].join(",")} ${coords.slice(1).map(c=>`L${c.join(",")}`).join(" ")} L${W},${H} L0,${H} Z`;
+
+    // Catmull-Rom → cubic Bézier for smooth curves
+    const tension = 0.35;
+    let linePath = `M${coords[0][0].toFixed(1)},${coords[0][1].toFixed(1)}`;
+    for (let i = 0; i < coords.length - 1; i++) {
+      const p0 = coords[Math.max(0, i - 1)];
+      const p1 = coords[i];
+      const p2 = coords[i + 1];
+      const p3 = coords[Math.min(coords.length - 1, i + 2)];
+      const cp1x = p1[0] + (p2[0] - p0[0]) * tension;
+      const cp1y = p1[1] + (p2[1] - p0[1]) * tension;
+      const cp2x = p2[0] - (p3[0] - p1[0]) * tension;
+      const cp2y = p2[1] - (p3[1] - p1[1]) * tension;
+      linePath += ` C${cp1x.toFixed(1)},${cp1y.toFixed(1)} ${cp2x.toFixed(1)},${cp2y.toFixed(1)} ${p2[0].toFixed(1)},${p2[1].toFixed(1)}`;
+    }
+    const last = coords[coords.length - 1];
+    const areaPath = `${linePath} L${W},${H} L0,${H} Z`;
+
     const gid = `sg${entity.replace(/[^a-z0-9]/gi,"")}`;
     return `<svg class="spark" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none">
       <defs><linearGradient id="${gid}" x1="0" y1="0" x2="0" y2="1">
-        <stop offset="0%" stop-color="${color}" stop-opacity="0.4"/>
+        <stop offset="0%" stop-color="${color}" stop-opacity="0.35"/>
         <stop offset="100%" stop-color="${color}" stop-opacity="0"/>
       </linearGradient></defs>
-      <path d="${area}" fill="url(#${gid})"/>
-      <polyline points="${line}" fill="none" stroke="${color}" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+      <path d="${areaPath}" fill="url(#${gid})"/>
+      <path d="${linePath}" fill="none" stroke="${color}" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
     </svg>`;
   }
 
@@ -1046,7 +1062,7 @@ button.is-pressed{transform:scale(.93)!important;filter:brightness(1.2)}
 .room.on .rdot{background:#a78bfa}
 .alloff .rdot{background:rgba(248,113,113,.35)}
 .alloff .ri{color:rgba(248,113,113,.55)}
-.tag{font-size:9px;color:rgba(255,255,255,.6);background:rgba(255,255,255,.1);padding:3px 8px;border-radius:9px;border:1px solid rgba(255,255,255,.13);text-transform:capitalize}
+.tag{font-size:9px;color:rgba(200,190,255,.8);background:rgba(167,139,250,.12);padding:3px 9px;border-radius:9px;border:1px solid rgba(167,139,250,.25);text-transform:capitalize}
 
 /* Climate summary — 3-col with sparklines */
 .clim-row{display:grid;grid-template-columns:1fr auto 1fr auto 1fr;align-items:start;gap:0}
@@ -1065,11 +1081,15 @@ button.is-pressed{transform:scale(.93)!important;filter:brightness(1.2)}
 
 /* Tesla card — Tesla-app style */
 .tc{overflow:hidden;padding:0}
-.tc-top{display:flex;justify-content:space-between;align-items:center;padding:11px 13px 5px}
+/* Header + car image share the same deep-space background */
+.tc-top{display:flex;justify-content:space-between;align-items:center;padding:13px 14px 0;
+  background:radial-gradient(ellipse 140% 200% at 50% -20%,rgba(28,22,58,.98),rgba(6,6,20,.99) 70%)}
 .tc-brand{display:flex;align-items:center;gap:8px}
 .tc-name{font-size:17px;font-weight:700;color:rgba(255,255,255,.92);letter-spacing:-.3px}
 .tc-sub{font-size:9px;color:rgba(255,255,255,.38);letter-spacing:.8px;text-transform:uppercase;margin-top:1px}
-.tc-img-wrap{width:100%;height:165px;position:relative;background:radial-gradient(ellipse 90% 80% at 50% 65%,rgba(18,18,45,.98),rgba(6,6,20,.99) 100%);display:flex;align-items:center;justify-content:center;overflow:hidden}
+.tc-img-wrap{width:100%;height:165px;position:relative;
+  background:radial-gradient(ellipse 140% 200% at 50% -40%,rgba(28,22,58,.98),rgba(6,6,20,.99) 70%);
+  display:flex;align-items:center;justify-content:center;overflow:hidden}
 .tc-glow{position:absolute;bottom:0;left:0;right:0;height:50px;background:radial-gradient(ellipse 90% 100% at 50% 100%,rgba(60,90,220,.2),transparent 70%);pointer-events:none}
 .tc-car{width:96%;height:100%;object-fit:contain;object-position:center 60%;filter:drop-shadow(0 14px 22px rgba(0,0,0,.65));pointer-events:none;user-select:none;position:relative;z-index:1}
 .tc-stats{padding:9px 13px 6px}
