@@ -186,8 +186,48 @@
     injectKioskStyle(root);
 
     root.querySelectorAll?.("*").forEach((el) => {
+      applyKioskElementFixes(el);
       if (el.shadowRoot) visitShadowRoots(el.shadowRoot, seen);
     });
+  }
+
+  function applyKioskElementFixes(el) {
+    const tag = el.localName;
+
+    if (tag === "app-drawer-layout") {
+      el.setAttribute("force-narrow", "");
+      el.setAttribute("narrow", "");
+      el.forceNarrow = true;
+      el.narrow = true;
+      el.style.setProperty("--app-drawer-width", "0px", "important");
+      el.style.setProperty("margin-left", "0", "important");
+      el.style.setProperty("padding-left", "0", "important");
+    }
+
+    if (
+      tag === "app-drawer" ||
+      tag === "ha-sidebar" ||
+      tag === "home-assistant-sidebar" ||
+      el.hasAttribute("drawer")
+    ) {
+      el.style.setProperty("display", "none", "important");
+      el.style.setProperty("width", "0", "important");
+      el.style.setProperty("min-width", "0", "important");
+      el.style.setProperty("max-width", "0", "important");
+    }
+
+    if (
+      tag === "home-assistant-main" ||
+      tag === "partial-panel-resolver" ||
+      tag === "ha-panel-lovelace" ||
+      tag === "hui-root" ||
+      tag === "hui-view"
+    ) {
+      el.style.setProperty("margin-left", "0", "important");
+      el.style.setProperty("left", "0", "important");
+      el.style.setProperty("width", "100%", "important");
+      el.style.setProperty("max-width", "none", "important");
+    }
   }
 
   function removeKioskStyles(root = document, seen = new Set()) {
@@ -210,11 +250,6 @@
 
     document.documentElement.classList.add("kliqer-tablet-kiosk");
     visitShadowRoots(document);
-
-    document.querySelectorAll?.("app-drawer-layout").forEach((layout) => {
-      layout.setAttribute("force-narrow", "");
-      layout.style.setProperty("--app-drawer-width", "0px", "important");
-    });
   }
 
   if (document.head) inject();
