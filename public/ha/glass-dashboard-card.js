@@ -25,7 +25,7 @@ class GlassDashboardCard extends HTMLElement {
         "light.led_strip_4","light.govee_tv_left","light.govee_tv_right",
         "light.rgbic_tv_backlight","light.tv_left","light.tv_right","light.marylin",
       ],
-      bedroomLights: ["light.bed","switch.night_light","light.kast","light.closet"],
+      bedroomLights: ["light.bed","light.kast","light.closet"],
       gameLights: [
         "light.plafond","light.desk_lamp","light.desk_led_strip",
         "light.battletron_smart_desk_light_strip","light.battletron_smart_desk_light_strip_2",
