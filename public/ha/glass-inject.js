@@ -136,6 +136,8 @@
     ha-sidebar,
     home-assistant-sidebar,
     app-drawer,
+    wa-drawer,
+    .sidebar-shell,
     [drawer] {
       display: none !important;
       width: 0 !important;
@@ -148,6 +150,12 @@
 
     app-drawer-layout {
       --app-drawer-width: 0px !important;
+    }
+
+    .app-content {
+      padding-inline-start: 0 !important;
+      width: 100% !important;
+      max-width: none !important;
     }
 
     home-assistant-main {
@@ -212,8 +220,17 @@
       el.style.setProperty("padding-left", "0", "important");
     }
 
+    if (tag === "ha-drawer") {
+      el.type = "modal";
+      el.open = false;
+      el.setAttribute("type", "modal");
+      el.removeAttribute("open");
+      el.style.setProperty("pointer-events", "auto", "important");
+    }
+
     if (
       tag === "app-drawer" ||
+      tag === "wa-drawer" ||
       tag === "ha-sidebar" ||
       tag === "home-assistant-sidebar" ||
       el.hasAttribute("drawer")

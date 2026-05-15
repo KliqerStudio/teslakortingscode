@@ -49,11 +49,10 @@ class GlassDashboardCard extends HTMLElement {
       teslaChargePort:"cover.model_3_charge_port_door",
       teslaFrunk:     "cover.model_3_froot",
       teslaBoot:      "cover.model_3_boot",
-      // P1 smart meter — adjust to match your HA integration (DSMR / Homewizard / etc.)
-      p1Power:        "sensor.dsmr_reading_electricity_currently_delivered",
-      p1Return:       "sensor.dsmr_reading_electricity_currently_returned",
-      p1Gas:          "sensor.dsmr_reading_gas_meter_reading",
-      p1EnergyToday:  "sensor.dsmr_day_consumption_electricity_merged",
+      p1Power:        "sensor.p1_meter_power",
+      p1Return:       "",
+      p1Gas:          "",
+      p1EnergyToday:  "sensor.p1_meter_energy_import",
       spotify:        "media_player.spotify_tristan_pahud_de_mortanges",
       spotifySpeaker: "media_player.dining_room",
       tv:             "media_player.lg_webos_tv_oled65c54la_2",
@@ -103,9 +102,9 @@ class GlassDashboardCard extends HTMLElement {
       e.teslaClimate, e.teslaBattery, e.teslaRange, e.teslaLocation,
       e.teslaDefrost, e.teslaSentry, e.teslaCharge,
       e.spotify, e.spotifySpeaker, e.tv, e.petFeederCamera,
-      e.p1Power, e.p1Return,
+      e.p1Power, e.p1Return, e.p1EnergyToday,
     ];
-    return watch.map(k => {
+    return watch.filter(Boolean).map(k => {
       const s = this._hass.states?.[k];
       return s ? `${s.state}|${s.last_changed}` : "";
     }).join("~");
@@ -163,9 +162,41 @@ class GlassDashboardCard extends HTMLElement {
       temperature: Math.round((cur + delta) * 2) / 2,
     });
   }
+  mediaState(entity, fallback = "idle") {
+    if (!entity) return fallback;
+    const s = this._hass?.states?.[entity]?.state;
+    if (!s) return fallback;
+    if (s === "unavailable" || s === "unknown") return "unavailable";
+    return s;
+  }
   mediaControlTarget() {
-    const s = this.st(this.entities.spotifySpeaker,"idle");
-    return ["playing","paused","on"].includes(s) ? this.entities.spotifySpeaker : this.entities.spotify;
+    const choices = [this.entities.spotify, this.entities.spotifySpeaker, this.entities.tv];
+    return (
+      choices.find(en => ["playing","paused"].includes(this.mediaState(en))) ||
+      [this.entities.spotifySpeaker, this.entities.tv, this.entities.spotify].find(en => ["on","idle"].includes(this.mediaState(en))) ||
+      this.entities.tv
+    );
+  }
+  mediaInfoEntity() {
+    const choices = [this.entities.spotify, this.entities.spotifySpeaker, this.entities.tv];
+    return (
+      choices.find(en => ["playing","paused"].includes(this.mediaState(en))) ||
+      this.entities.spotify
+    );
+  }
+  async mediaPlayPause() {
+    const target = this.mediaControlTarget();
+    const isPlaying = this.mediaState(target) === "playing";
+    try {
+      await this.service("media_player", isPlaying ? "media_pause" : "media_play", { entity_id: target });
+    } catch (err) {
+      console.warn("[GlassDash] media play/pause fallback:", err);
+      try {
+        await this.service("media_player", "media_play_pause", { entity_id: target });
+      } catch (fallbackErr) {
+        console.warn("[GlassDash] media_play_pause failed:", fallbackErr);
+      }
+    }
   }
 
   // ── Data Loading ─────────────────────────────────────────────────────────────
@@ -232,8 +263,8 @@ class GlassDashboardCard extends HTMLElement {
     const sensors = [
       this.entities.livingTemp, this.entities.livingHumidity, this.entities.livingAir,
       this.entities.bedTemp,    this.entities.bedHumidity,    this.entities.bedAir,
-      this.entities.p1Power,    this.entities.p1Return,
-    ];
+      this.entities.p1Power,    this.entities.p1Return,      this.entities.p1EnergyToday,
+    ].filter(Boolean);
     try {
       // Primary: REST API — full response (no minimal_response) so stable sensors
       // that barely change still get their history entries recorded properly.
@@ -300,9 +331,12 @@ class GlassDashboardCard extends HTMLElement {
           }
         }
       }
-      if (!consumptionIds.length) return; // Energy not configured in HA
       this._energy.consumptionIds = consumptionIds;
       this._energy.costIds        = costIds;
+      if (!consumptionIds.length) {
+        this.render();
+        return; // Energy not configured in HA; live P1 still renders from entity state/history.
+      }
 
       const period   = this._energy.period;
       const now      = Date.now();
@@ -446,11 +480,17 @@ class GlassDashboardCard extends HTMLElement {
     }
     if (pts.length < 1) return `<div class="spark-empty"></div>`;
 
+    const lname = String(entity).toLowerCase();
+    if (lname.includes("temperature")) pts = pts.filter(p => p.v > -20 && p.v < 55);
+    if (lname.includes("humidity")) pts = pts.filter(p => p.v >= 0 && p.v <= 100);
+    if (lname.includes("power")) pts = pts.filter(p => p.v >= 0 && p.v < 20000);
+    if (pts.length < 1) return `<div class="spark-empty"></div>`;
+
     // Time-bucket averaging: divide 6h window into 60 buckets (6-min each).
     // Average all values within each bucket → eliminates noise, fills gaps.
     const minT = pts[0].t, maxT = pts[pts.length - 1].t;
     const tRng = maxT - minT || 1;
-    const BUCKETS = 60;
+    const BUCKETS = 42;
     const bucketMs = tRng / BUCKETS;
     const dp = [];
     for (let i = 0; i < BUCKETS; i++) {
@@ -468,32 +508,27 @@ class GlassDashboardCard extends HTMLElement {
       dp.push({ v, t: minT }, { v, t: maxT });
     }
 
+    const smoothed = dp.map((p, i) => {
+      const local = dp.slice(Math.max(0, i - 2), Math.min(dp.length, i + 3)).map(x => x.v).sort((a,b) => a-b);
+      const median = local[Math.floor(local.length / 2)];
+      return { ...p, v: (p.v * 0.35) + (median * 0.65) };
+    });
+
     const W = 200, H = 32;
-    const minV = Math.min(...dp.map(p => p.v));
-    const maxV = Math.max(...dp.map(p => p.v));
+    const minV = Math.min(...smoothed.map(p => p.v));
+    const maxV = Math.max(...smoothed.map(p => p.v));
     const pad = Math.max((maxV - minV) * 0.2, 0.3);
     const lo = minV - pad, hi = maxV + pad, rng = hi - lo;
-    const dMinT = dp[0].t, dMaxT = dp[dp.length - 1].t, dTRng = dMaxT - dMinT || 1;
+    const dMinT = smoothed[0].t, dMaxT = smoothed[smoothed.length - 1].t, dTRng = dMaxT - dMinT || 1;
 
-    const coords = dp.map(p => [
+    const coords = smoothed.map(p => [
       (p.t - dMinT) / dTRng * W,
       H - 2 - (p.v - lo) / rng * (H - 6),
     ]);
 
-    // Catmull-Rom → cubic Bézier (smooth, never spiky)
-    const tension = 0.3;
-    let linePath = `M${coords[0][0].toFixed(1)},${coords[0][1].toFixed(1)}`;
-    for (let i = 0; i < coords.length - 1; i++) {
-      const p0 = coords[Math.max(0, i - 1)];
-      const p1 = coords[i];
-      const p2 = coords[i + 1];
-      const p3 = coords[Math.min(coords.length - 1, i + 2)];
-      const cp1x = p1[0] + (p2[0] - p0[0]) * tension;
-      const cp1y = p1[1] + (p2[1] - p0[1]) * tension;
-      const cp2x = p2[0] - (p3[0] - p1[0]) * tension;
-      const cp2y = p2[1] - (p3[1] - p1[1]) * tension;
-      linePath += ` C${cp1x.toFixed(1)},${cp1y.toFixed(1)} ${cp2x.toFixed(1)},${cp2y.toFixed(1)} ${p2[0].toFixed(1)},${p2[1].toFixed(1)}`;
-    }
+    const linePath = coords.map((p, i) =>
+      `${i === 0 ? "M" : "L"}${p[0].toFixed(1)},${p[1].toFixed(1)}`
+    ).join(" ");
     const areaPath = `${linePath} L${W},${H} L0,${H} Z`;
     const gid = `sg${entity.replace(/[^a-z0-9]/gi, "")}`;
     return `<svg class="spark" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none">
@@ -503,6 +538,7 @@ class GlassDashboardCard extends HTMLElement {
       </linearGradient></defs>
       <path d="${areaPath}" fill="url(#${gid})"/>
       <path d="${linePath}" fill="none" stroke="${color}" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+      <circle cx="${coords[coords.length-1][0].toFixed(1)}" cy="${coords[coords.length-1][1].toFixed(1)}" r="2.2" fill="${color}"/>
     </svg>`;
   }
 
@@ -572,21 +608,23 @@ class GlassDashboardCard extends HTMLElement {
     const weatherUV       = this.attr(e.weather,"uv_index",null);
     const weatherVis      = this.attr(e.weather,"visibility",null);
 
-    const spotifyTitle  = this.attr(e.spotify,"media_title","");
-    const spotifyArtist = this.attr(e.spotify,"media_artist","");
-    const spotifyAlbum  = this.attr(e.spotify,"media_album_name","");
-    const spotifyPic    = this.attr(e.spotify,"entity_picture","") || this.attr(e.spotifySpeaker,"entity_picture","");
-    const spotifyState  = this.st(e.spotify,"idle");
-    const spkState      = this.st(e.spotifySpeaker,"idle");
-    const spotifyPlaying= spotifyState==="playing"||spkState==="playing";
-    const spotifyActive = ["playing","paused"].includes(spotifyState)||["playing","paused"].includes(spkState);
-    const durSec  = Number(this.attr(e.spotify,"media_duration",0))||0;
-    const posSec  = Number(this.attr(e.spotify,"media_position",0))||0;
-    const posUpAt = this.attr(e.spotify,"media_position_updated_at",null);
+    const mediaEntity   = this.mediaInfoEntity();
+    const spotifyTitle  = this.attr(mediaEntity,"media_title","") || this.attr(mediaEntity,"source","");
+    const spotifyArtist = this.attr(mediaEntity,"media_artist","") || this.attr(mediaEntity,"friendly_name","");
+    const spotifyAlbum  = this.attr(mediaEntity,"media_album_name","");
+    const spotifyPic    = this.attr(mediaEntity,"entity_picture","") || this.attr(e.spotifySpeaker,"entity_picture","") || this.attr(e.tv,"entity_picture","");
+    const spotifyState  = this.mediaState(e.spotify,"idle");
+    const spkState      = this.mediaState(e.spotifySpeaker,"idle");
+    const mediaState    = this.mediaState(mediaEntity,"idle");
+    const spotifyPlaying= mediaState==="playing";
+    const spotifyActive = ["playing","paused"].includes(mediaState) || ["playing","paused"].includes(spotifyState)||["playing","paused"].includes(spkState);
+    const durSec  = Number(this.attr(mediaEntity,"media_duration",0))||0;
+    const posSec  = Number(this.attr(mediaEntity,"media_position",0))||0;
+    const posUpAt = this.attr(mediaEntity,"media_position_updated_at",null);
     const elapsed = posUpAt && spotifyPlaying ? (Date.now()-new Date(posUpAt).getTime())/1000 : 0;
     const curPos  = Math.min(posSec+elapsed, durSec||1);
     const spProg  = durSec>0 ? Math.min((curPos/durSec)*100,100) : 0;
-    const volPct  = Math.round(Number(this.attr(e.spotifySpeaker,"volume_level",0)||0)*100);
+    const volPct  = Math.round(Number(this.attr(mediaEntity,"volume_level",0)||0)*100);
 
     const camSrc = this._lastCamUrl || (this._hass?.states?.[e.petFeederCamera]?.attributes?.entity_picture || "");
 
@@ -718,20 +756,18 @@ class GlassDashboardCard extends HTMLElement {
 
     // Spotify
     const tgt = () => this.mediaControlTarget();
-    this.shadowRoot.querySelector("[data-sp='play-pause']")?.addEventListener("click", () => {
-      const isPlaying = this.st(this.entities.spotify,"idle") === "playing"
-        || this.st(this.entities.spotifySpeaker,"idle") === "playing";
-      this.service("media_player", isPlaying ? "media_pause" : "media_play", { entity_id: tgt() });
-    });
+    this.shadowRoot.querySelector("[data-sp='play-pause']")?.addEventListener("click", () => this.mediaPlayPause());
     this.shadowRoot.querySelector("[data-sp='prev']")      ?.addEventListener("click", () => this.service("media_player","media_previous_track",{ entity_id:tgt() }));
     this.shadowRoot.querySelector("[data-sp='next']")      ?.addEventListener("click", () => this.service("media_player","media_next_track",{ entity_id:tgt() }));
     this.shadowRoot.querySelector("[data-sp='vol-up']")    ?.addEventListener("click", () => {
-      const cur = Number(this.attr(this.entities.spotifySpeaker,"volume_level",0))||0;
-      this.service("media_player","volume_set",{ entity_id:this.entities.spotifySpeaker, volume_level:Math.min(1,cur+0.05) });
+      const target = tgt();
+      const cur = Number(this.attr(target,"volume_level",0))||0;
+      this.service("media_player","volume_set",{ entity_id:target, volume_level:Math.min(1,cur+0.05) });
     });
     this.shadowRoot.querySelector("[data-sp='vol-down']")  ?.addEventListener("click", () => {
-      const cur = Number(this.attr(this.entities.spotifySpeaker,"volume_level",0))||0;
-      this.service("media_player","volume_set",{ entity_id:this.entities.spotifySpeaker, volume_level:Math.max(0,cur-0.05) });
+      const target = tgt();
+      const cur = Number(this.attr(target,"volume_level",0))||0;
+      this.service("media_player","volume_set",{ entity_id:target, volume_level:Math.max(0,cur-0.05) });
     });
 
     this.shadowRoot.querySelector("[data-action='cam-refresh']")?.addEventListener("click", () => this.updateCamera());
@@ -1453,10 +1489,10 @@ button.is-pressed{transform:scale(.93)!important;filter:brightness(1.2)}
 
 /* Energy section */
 .en-section{padding:10px}
-.en-nodata{display:flex;align-items:center;gap:7px;color:rgba(255,255,255,.28);font-size:9px;padding:2px 0 8px;line-height:1.5}
-.en-live-row{display:flex;align-items:center;gap:12px;margin-bottom:10px}
-.en-live-block{flex-shrink:0}
-.en-live-val{font-size:26px;font-weight:300;letter-spacing:-1px;line-height:1.05;transition:color .3s}
+.en-nodata{display:flex;align-items:center;gap:7px;color:rgba(255,255,255,.38);font-size:9px;padding:3px 0 0;line-height:1.5}
+.en-live-row{display:flex;align-items:stretch;gap:12px;margin-bottom:10px;width:100%}
+.en-live-block{flex:1;min-width:0}
+.en-live-val{font-size:30px;font-weight:300;letter-spacing:-1px;line-height:1.05;transition:color .3s}
 .en-live-lbl{font-size:8px;color:rgba(255,255,255,.36);text-transform:uppercase;letter-spacing:.6px;margin-top:2px}
 .en-divider{width:1px;height:40px;background:rgba(255,255,255,.1);flex-shrink:0}
 .en-today-block{flex:1;min-width:0}
