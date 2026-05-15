@@ -132,7 +132,9 @@ class GlassDashboardCard extends HTMLElement {
   // ── Data Loading ─────────────────────────────────────────────────────────────
   async loadForecast() {
     if (this._forecastLoading) return;
+    // If we have data, cache for 30 min. If empty, retry every 30 seconds.
     if (this._forecast?.length && Date.now() - this._forecastLoadedAt < 1800000) return;
+    if (!this._forecast?.length && this._forecastLoadedAt && Date.now() - this._forecastLoadedAt < 30000) return;
     this._forecastLoading = true;
     try {
       if (this._hass?.callWS) {
@@ -141,17 +143,28 @@ class GlassDashboardCard extends HTMLElement {
           entity_id: this.entities.weather,
           forecast_type: "daily",
         });
-        this._forecast = data?.[this.entities.weather]?.forecast || [];
+        // Handle both response shapes
+        this._forecast = data?.[this.entities.weather]?.forecast
+          || data?.response?.[this.entities.weather]?.forecast
+          || [];
       }
+      // Fallback: read forecast attribute directly from entity state
       if (!this._forecast?.length) {
-        this._forecast = this.attr(this.entities.weather,"forecast",[]) || [];
+        const raw = this.attr(this.entities.weather, "forecast", null);
+        if (Array.isArray(raw) && raw.length) this._forecast = raw;
       }
       this._forecastLoadedAt = Date.now();
       if (this._forecast.length) this.render();
-    } catch {
-      this._forecast = this.attr(this.entities.weather,"forecast",[]) || [];
-      this._forecastLoadedAt = Date.now();
-      if (this._forecast.length) this.render();
+    } catch(err) {
+      console.warn("[GlassDash] Forecast error:", err);
+      const raw = this.attr(this.entities.weather, "forecast", null);
+      if (Array.isArray(raw) && raw.length) {
+        this._forecast = raw;
+        this._forecastLoadedAt = Date.now();
+        this.render();
+      } else {
+        this._forecastLoadedAt = Date.now(); // still stamp so we throttle retries
+      }
     } finally {
       this._forecastLoading = false;
     }
@@ -262,12 +275,14 @@ class GlassDashboardCard extends HTMLElement {
     const dp = pts.filter((_,i) => i % step === 0 || i === pts.length-1);
     const W = 200, H = 32;
     const minV = Math.min(...dp.map(p=>p.v)), maxV = Math.max(...dp.map(p=>p.v));
-    const rng = maxV - minV || 1;
+    // Add 10% padding so flat lines show in the middle, not squished to edge
+    const pad = Math.max((maxV - minV) * 0.15, 0.2);
+    const lo = minV - pad, hi = maxV + pad, rng = hi - lo;
     const minT = dp[0].t, maxT = dp[dp.length-1].t;
     const tRng = maxT - minT || 1;
     const coords = dp.map(p => [
       ((p.t - minT) / tRng * W).toFixed(1),
-      (H - 2 - (p.v - minV) / rng * (H - 8)).toFixed(1),
+      (H - 2 - (p.v - lo) / rng * (H - 6)).toFixed(1),
     ]);
     const line = coords.map(c=>c.join(",")).join(" ");
     const area = `M${coords[0].join(",")} ${coords.slice(1).map(c=>`L${c.join(",")}`).join(" ")} L${W},${H} L0,${H} Z`;
@@ -385,6 +400,8 @@ class GlassDashboardCard extends HTMLElement {
   <!-- OVERVIEW -->
   <div class="page page-ov ${this._tab==="ov"?"active":""} z1">
     <div class="ov-main">
+
+      <!-- LEFT: lights + climate + spotify + media -->
       <div class="col">
         <section class="gl block">
           <div class="slbl">Lights</div>
@@ -402,10 +419,6 @@ class GlassDashboardCard extends HTMLElement {
         </section>
         ${this.climateSummary("Living Room · Climate",e.livingTemp,e.livingHumidity,e.livingAir)}
         ${this.climateSummary("Bedroom · Climate",e.bedTemp,e.bedHumidity,e.bedAir)}
-      </div>
-
-      <div class="col">
-        ${this.teslaCard(batteryRaw,range,teslaPlace,climOn,targetTemp)}
         ${this.spotifySection(spotifyPic,spotifyTitle,spotifyArtist,spotifyAlbum,spotifyActive,spotifyPlaying,curPos,durSec,spProg,volPct)}
         <section class="gl media-strip">
           <div class="media-item">
@@ -417,6 +430,11 @@ class GlassDashboardCard extends HTMLElement {
             <div><b>Dining Room</b><span>${spkNice}</span></div>
           </div>
         </section>
+      </div>
+
+      <!-- RIGHT: Tesla only -->
+      <div class="col">
+        ${this.teslaCard(batteryRaw,range,teslaPlace,climOn,targetTemp)}
       </div>
     </div>
     ${this.weatherSection(weatherState,weatherTemp,weatherHumidity,weatherWind,weatherFeels,weatherUV,weatherVis)}
@@ -517,11 +535,20 @@ class GlassDashboardCard extends HTMLElement {
     </button>`;
   }
 
+  aqDisplay(rawAq) {
+    const aqLbl = this.aqLabel(rawAq);
+    const aqc   = this.aqColor(rawAq);
+    const n     = Number(rawAq);
+    const isNum = Number.isFinite(n);
+    const valHtml = isNum
+      ? `<div class="cv" style="color:${aqc}">${n.toFixed(0)}<span class="cu" style="color:${aqc}99"> µg/m³</span></div>`
+      : `<div class="cv aq-text" style="color:${aqc}">${aqLbl}</div>`;
+    return { aqLbl, aqc, valHtml };
+  }
+
   climateSummary(title, temp, humidity, air) {
-    const rawAq  = this.st(air,"0");
-    const aqLbl  = this.aqLabel(rawAq);
-    const aqc    = this.aqColor(rawAq);
-    const aqNum  = Number.isFinite(Number(rawAq)) ? Number(rawAq).toFixed(0) : rawAq;
+    const rawAq = this.st(air, "--");
+    const { aqLbl, aqc, valHtml } = this.aqDisplay(rawAq);
     return `<section class="gl block">
       <div class="slbl">${title}</div>
       <div class="clim-row">
@@ -539,8 +566,8 @@ class GlassDashboardCard extends HTMLElement {
         <div class="clim-sep"></div>
         <div class="clim-col aq-col">
           <div class="aq-dot" style="background:${aqc};box-shadow:0 0 9px ${aqc}99"></div>
-          <div class="cv" style="color:${aqc};margin-top:3px">${aqNum}<span class="cu" style="color:${aqc}99">µg</span></div>
-          <div class="cl" style="color:${aqc}cc">${aqLbl}</div>
+          ${valHtml}
+          <div class="cl" style="color:${aqc}bb">${aqLbl} · Air</div>
         </div>
       </div>
     </section>`;
@@ -551,9 +578,9 @@ class GlassDashboardCard extends HTMLElement {
     const climLabel = climOn ? `On · ${targetTemp}°C` : `Off · ${targetTemp}°C`;
     return `<section class="gl tc">
       <div class="tc-top">
-        <div class="tc-brand">
-          <div class="tc-t">T</div>
+        <div>
           <div class="tc-name">Model 3</div>
+          <div class="tc-sub">Tesla</div>
         </div>
         <div class="tag">${place}</div>
       </div>
@@ -696,10 +723,8 @@ class GlassDashboardCard extends HTMLElement {
   }
 
   climateDetail(temp, humidity, air) {
-    const rawAq = this.st(air,"0");
-    const aqLbl = this.aqLabel(rawAq);
-    const aqc   = this.aqColor(rawAq);
-    const aqNum = Number.isFinite(Number(rawAq)) ? Number(rawAq).toFixed(0) : rawAq;
+    const rawAq = this.st(air, "--");
+    const { aqLbl, aqc, valHtml } = this.aqDisplay(rawAq);
     return `<section class="gl block">
       <div class="slbl">Climate</div>
       <div class="clim-row">
@@ -717,8 +742,8 @@ class GlassDashboardCard extends HTMLElement {
         <div class="clim-sep"></div>
         <div class="clim-col aq-col">
           <div class="aq-dot" style="background:${aqc};box-shadow:0 0 9px ${aqc}99"></div>
-          <div class="cv" style="color:${aqc};margin-top:3px">${aqNum}<span class="cu" style="color:${aqc}99">µg</span></div>
-          <div class="cl" style="color:${aqc}cc">${aqLbl}</div>
+          ${valHtml}
+          <div class="cl" style="color:${aqc}bb">${aqLbl} · Air</div>
         </div>
       </div>
     </section>`;
@@ -901,14 +926,15 @@ button.is-pressed{transform:scale(.93)!important;filter:brightness(1.2)}
 .spark{width:100%;height:32px;display:block}
 .spark-empty{width:100%;height:32px;border-bottom:1px solid rgba(255,255,255,.06)}
 .aq-dot{width:10px;height:10px;border-radius:50%;flex-shrink:0;animation:aq-breathe 2.5s ease-in-out infinite;margin-bottom:4px}
+.aq-text{font-size:17px!important;font-weight:700!important;text-transform:capitalize}
 @keyframes aq-breathe{0%,100%{opacity:1;transform:scale(1)}50%{opacity:.6;transform:scale(.82)}}
 
 /* Tesla card — Tesla-app style */
 .tc{overflow:hidden;padding:0}
 .tc-top{display:flex;justify-content:space-between;align-items:center;padding:11px 13px 5px}
 .tc-brand{display:flex;align-items:center;gap:8px}
-.tc-t{width:26px;height:26px;background:linear-gradient(145deg,#e00,#900);border-radius:5px;display:flex;align-items:center;justify-content:center;font-size:16px;font-weight:900;color:#fff;font-style:italic;flex-shrink:0;box-shadow:0 2px 8px rgba(200,0,0,.4)}
 .tc-name{font-size:17px;font-weight:700;color:rgba(255,255,255,.92);letter-spacing:-.3px}
+.tc-sub{font-size:9px;color:rgba(255,255,255,.38);letter-spacing:.8px;text-transform:uppercase;margin-top:1px}
 .tc-img-wrap{width:100%;height:165px;position:relative;background:radial-gradient(ellipse 90% 80% at 50% 65%,rgba(18,18,45,.98),rgba(6,6,20,.99) 100%);display:flex;align-items:center;justify-content:center;overflow:hidden}
 .tc-glow{position:absolute;bottom:0;left:0;right:0;height:50px;background:radial-gradient(ellipse 90% 100% at 50% 100%,rgba(60,90,220,.2),transparent 70%);pointer-events:none}
 .tc-car{width:96%;height:100%;object-fit:contain;object-position:center 60%;filter:drop-shadow(0 14px 22px rgba(0,0,0,.65));pointer-events:none;user-select:none;position:relative;z-index:1}
