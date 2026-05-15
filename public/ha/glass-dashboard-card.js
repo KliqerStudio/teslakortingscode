@@ -142,7 +142,10 @@ class GlassDashboardCard extends HTMLElement {
   countOn(entities) { return entities.filter(e => this.isOn(e)).length; }
   service(domain, svc, data) { return this._hass?.callService(domain, svc, data); }
   toggleEntity(entity) { this.service(entity.split(".")[0], "toggle", { entity_id: entity }); }
-  toggleGroup(entities) { this.service("homeassistant","toggle",{ entity_id: entities }); }
+  toggleGroup(entities) {
+    const anyOn = entities.some(e => this.isOn(e));
+    this.service("homeassistant", anyOn ? "turn_off" : "turn_on", { entity_id: entities });
+  }
   turnOffAll() {
     this.service("homeassistant","turn_off",{ entity_id:[
       ...this.entities.mainLights,...this.entities.bedroomLights,
@@ -421,13 +424,26 @@ class GlassDashboardCard extends HTMLElement {
     if (!raw || raw.length < 1) return `<div class="spark-empty"></div>`;
 
     // Parse all valid numeric state entries (handles full and minimal_response format)
-    const pts = raw.map(s => ({
+    let pts = raw.map(s => ({
       v: Number(s.state ?? s.s),
       t: s.last_changed
         ? new Date(s.last_changed).getTime()
         : (s.lu ? s.lu * 1000 : 0),
     })).filter(p => Number.isFinite(p.v) && p.t > 0);
 
+    if (pts.length < 1) return `<div class="spark-empty"></div>`;
+
+    // IQR outlier filter — prevents sensor glitches from blowing the Y axis
+    if (pts.length >= 6) {
+      const sorted = [...pts].sort((a, b) => a.v - b.v);
+      const q1 = sorted[Math.floor(sorted.length * 0.25)].v;
+      const q3 = sorted[Math.floor(sorted.length * 0.75)].v;
+      const iqr = q3 - q1;
+      if (iqr > 0) {
+        const lo = q1 - 3 * iqr, hi = q3 + 3 * iqr;
+        pts = pts.filter(p => p.v >= lo && p.v <= hi);
+      }
+    }
     if (pts.length < 1) return `<div class="spark-empty"></div>`;
 
     // Time-bucket averaging: divide 6h window into 60 buckets (6-min each).
@@ -702,7 +718,11 @@ class GlassDashboardCard extends HTMLElement {
 
     // Spotify
     const tgt = () => this.mediaControlTarget();
-    this.shadowRoot.querySelector("[data-sp='play-pause']")?.addEventListener("click", () => this.service("media_player","media_play_pause",{ entity_id:tgt() }));
+    this.shadowRoot.querySelector("[data-sp='play-pause']")?.addEventListener("click", () => {
+      const isPlaying = this.st(this.entities.spotify,"idle") === "playing"
+        || this.st(this.entities.spotifySpeaker,"idle") === "playing";
+      this.service("media_player", isPlaying ? "media_pause" : "media_play", { entity_id: tgt() });
+    });
     this.shadowRoot.querySelector("[data-sp='prev']")      ?.addEventListener("click", () => this.service("media_player","media_previous_track",{ entity_id:tgt() }));
     this.shadowRoot.querySelector("[data-sp='next']")      ?.addEventListener("click", () => this.service("media_player","media_next_track",{ entity_id:tgt() }));
     this.shadowRoot.querySelector("[data-sp='vol-up']")    ?.addEventListener("click", () => {
@@ -839,20 +859,20 @@ class GlassDashboardCard extends HTMLElement {
 
     return `<section class="gl block en-section">
       <div class="slbl">Energy</div>
-      ${noConfig ? `<div class="en-nodata"><ha-icon icon="mdi:lightning-bolt-outline" style="--mdc-icon-size:13px;opacity:.35"></ha-icon><span>Configure HA Energy dashboard to enable stats</span></div>` : ""}
       <div class="en-live-row">
         <div class="en-live-block">
           <div class="en-live-val" style="color:${powerColor}">${liveVal}</div>
           <div class="en-live-lbl">${liveLabel}</div>
+          <div class="spark-wrap" style="margin-top:4px">${this.sparkline(e.p1Power, powerColor)}</div>
         </div>
-        ${dayStats || consumptionIds.length ? `<div class="en-divider"></div>
+        ${!noConfig && (dayStats || consumptionIds.length) ? `<div class="en-divider"></div>
         <div class="en-today-block">
           <div class="en-today-val">${todayKwh > 0 ? todayKwh.toFixed(2) : "--"}<span class="en-unit"> kWh</span></div>
           <div class="en-today-cost">${todayKwh > 0 ? "€"+todayCost+" today" : this._energy.loading ? "Loading…" : "No data yet"}</div>
         </div>` : ""}
       </div>
       ${!noConfig ? `<div class="en-tabs">${tabs}</div>
-      <div class="en-chart">${buckets.length ? this._energyBars(buckets) : `<div class="en-loading">${this._energy.loading ? "Loading…" : "No data"}</div>`}</div>` : ""}
+      <div class="en-chart">${buckets.length ? this._energyBars(buckets) : `<div class="en-loading">${this._energy.loading ? "Loading…" : "No data"}</div>`}</div>` : `<div class="en-nodata"><ha-icon icon="mdi:lightning-bolt-outline" style="--mdc-icon-size:13px;opacity:.35"></ha-icon><span>Add energy sources in HA Energy dashboard for usage history</span></div>`}
     </section>`;
   }
 
