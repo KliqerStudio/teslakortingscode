@@ -97,12 +97,12 @@ class GlassDashboardCard extends HTMLElement {
     if (!this._hass) return "";
     const e = this.entities;
     const watch = [
-      ...e.mainLights, ...e.bedroomLights, ...e.gameLights, ...e.utilityLights,
+      ...e.mainLights, ...e.bedroomLights, ...e.gameLights, ...e.utilityLights, ...e.toonDevices,
       e.livingTemp, e.livingHumidity, e.livingAir,
       e.bedTemp, e.bedHumidity, e.bedAir, e.weather,
       e.teslaClimate, e.teslaBattery, e.teslaRange, e.teslaLocation,
       e.teslaDefrost, e.teslaSentry, e.teslaCharge,
-      e.spotify, e.spotifySpeaker, e.tv,
+      e.spotify, e.spotifySpeaker, e.tv, e.petFeederCamera,
       e.p1Power, e.p1Return,
     ];
     return watch.map(k => {
@@ -852,7 +852,7 @@ class GlassDashboardCard extends HTMLElement {
     const periodStats = this._energy.stats[period];
     const buckets     = this._buildEnergyBuckets(periodStats, consumptionIds);
 
-    const noConfig    = !this._energy.prefs && !this._energy.loading;
+    const hasEnergyConfig = consumptionIds.length > 0;
     const tabs = ["day","week","month","year"].map(p =>
       `<button class="en-tab ${p===period?"active":""}" data-energy-period="${p}">${p.charAt(0).toUpperCase()+p.slice(1)}</button>`
     ).join("");
@@ -865,13 +865,13 @@ class GlassDashboardCard extends HTMLElement {
           <div class="en-live-lbl">${liveLabel}</div>
           <div class="spark-wrap" style="margin-top:4px">${this.sparkline(e.p1Power, powerColor)}</div>
         </div>
-        ${!noConfig && (dayStats || consumptionIds.length) ? `<div class="en-divider"></div>
+        ${hasEnergyConfig ? `<div class="en-divider"></div>
         <div class="en-today-block">
           <div class="en-today-val">${todayKwh > 0 ? todayKwh.toFixed(2) : "--"}<span class="en-unit"> kWh</span></div>
           <div class="en-today-cost">${todayKwh > 0 ? "€"+todayCost+" today" : this._energy.loading ? "Loading…" : "No data yet"}</div>
         </div>` : ""}
       </div>
-      ${!noConfig ? `<div class="en-tabs">${tabs}</div>
+      ${hasEnergyConfig ? `<div class="en-tabs">${tabs}</div>
       <div class="en-chart">${buckets.length ? this._energyBars(buckets) : `<div class="en-loading">${this._energy.loading ? "Loading…" : "No data"}</div>`}</div>` : `<div class="en-nodata"><ha-icon icon="mdi:lightning-bolt-outline" style="--mdc-icon-size:13px;opacity:.35"></ha-icon><span>Add energy sources in HA Energy dashboard for usage history</span></div>`}
     </section>`;
   }
@@ -1250,7 +1250,7 @@ button{font:inherit;color:inherit;border:0;text-align:inherit;cursor:pointer;bac
 .block{padding:10px}
 
 /* Topbar */
-.topbar{display:flex;align-items:center;justify-content:space-between;padding:10px 16px 6px}
+.topbar{display:flex;align-items:center;justify-content:space-between;padding:8px 12px 5px}
 .home-lbl{font-size:12px;font-weight:700;color:rgba(255,255,255,.55);letter-spacing:1.4px;text-transform:uppercase}
 .home-sub{font-size:9px;color:rgba(255,255,255,.32);margin-top:1px}
 .topbar-right{display:flex;align-items:center;gap:9px}
@@ -1262,23 +1262,23 @@ button{font:inherit;color:inherit;border:0;text-align:inherit;cursor:pointer;bac
 .fs-btn ha-icon{--mdc-icon-size:16px;color:rgba(255,255,255,.6)}
 
 /* Tabs */
-.tabs{display:flex;gap:4px;padding:0 12px 7px;overflow-x:auto;scrollbar-width:none}
+.tabs{display:flex;gap:4px;padding:0 10px 6px;overflow-x:auto;scrollbar-width:none}
 .tabs::-webkit-scrollbar{display:none}
-.tab{flex-shrink:0;display:flex;align-items:center;gap:5px;padding:6px 11px;border-radius:20px;font-size:11px;font-weight:700;color:rgba(255,255,255,.48);border:1px solid rgba(255,255,255,.06);background:rgba(255,255,255,.05);transition:all .18s,transform .08s;white-space:nowrap}
+.tab{flex-shrink:0;display:flex;align-items:center;gap:5px;padding:5px 10px;border-radius:18px;font-size:10.5px;font-weight:700;color:rgba(255,255,255,.48);border:1px solid rgba(255,255,255,.06);background:rgba(255,255,255,.05);transition:all .18s,transform .08s;white-space:nowrap}
 .tab ha-icon{--mdc-icon-size:13px;opacity:.7}
 .tab:hover{color:rgba(255,255,255,.70);background:rgba(255,255,255,.09)}
 .tab.active{background:rgba(255,255,255,.15);border-color:rgba(255,255,255,.28);color:rgba(255,255,255,.96)}
 .tab.active ha-icon{opacity:1}
-.divider{height:1px;background:rgba(255,255,255,.07);margin:0 12px}
+.divider{height:1px;background:rgba(255,255,255,.07);margin:0 10px}
 
 /* Page layout */
-.page{display:none;flex:1;padding:8px 10px 10px;flex-direction:column;overflow-y:auto;scrollbar-width:none}
+.page{display:none;flex:1;padding:6px 8px 8px;flex-direction:column;overflow-y:auto;scrollbar-width:none}
 .page::-webkit-scrollbar{display:none}
 .page.active{display:flex}
-.page-ov{gap:8px}
-.ov-main{display:grid;grid-template-columns:1fr 1fr;gap:8px}
-.g2{display:grid;grid-template-columns:1fr 1fr;gap:8px;width:100%}
-.col{display:flex;flex-direction:column;gap:7px;min-width:0}
+.page-ov{gap:6px}
+.ov-main{display:grid;grid-template-columns:1fr 1fr;gap:6px}
+.g2{display:grid;grid-template-columns:1fr 1fr;gap:6px;width:100%}
+.col{display:flex;flex-direction:column;gap:6px;min-width:0}
 
 /* Press/active */
 button{transition:transform .08s ease,filter .08s ease,box-shadow .1s}
@@ -1291,8 +1291,8 @@ button.is-pressed{transform:scale(.93)!important;filter:brightness(1.2)}
 .tc-tbtn.is-pressed{background:rgba(255,255,255,.25)!important}
 
 /* Rooms */
-.rooms5{display:grid;grid-template-columns:repeat(5,1fr);gap:5px}
-.room{padding:9px 4px 8px;transition:all .18s,transform .08s;position:relative;border-radius:12px;text-align:center}
+.rooms5{display:grid;grid-template-columns:repeat(5,1fr);gap:4px}
+.room{padding:7px 4px 6px;transition:all .18s,transform .08s;position:relative;border-radius:11px;text-align:center}
 .room:hover{background:rgba(255,255,255,.09)}
 .room.on{background:rgba(255,255,255,.11);border-color:rgba(200,180,255,.22)}
 .ri{--mdc-icon-size:17px;color:rgba(255,255,255,.42);margin:0 auto 3px;display:block;transition:color .18s}
@@ -1324,19 +1324,19 @@ button.is-pressed{transform:scale(.93)!important;filter:brightness(1.2)}
 .tc{overflow:hidden;padding:0}
 /* Single wrapper gives header + car image one unified dark background */
 .tc-hero{background:linear-gradient(180deg,rgba(16,10,38,.98) 0%,rgba(5,5,18,.99) 100%)}
-.tc-top{display:flex;justify-content:space-between;align-items:center;padding:13px 14px 4px;background:transparent}
+.tc-top{display:flex;justify-content:space-between;align-items:center;padding:10px 12px 3px;background:transparent}
 .tc-brand{display:flex;align-items:center;gap:8px}
 .tc-name{font-size:17px;font-weight:700;color:rgba(255,255,255,.92);letter-spacing:-.3px}
 .tc-sub{font-size:9px;color:rgba(255,255,255,.38);letter-spacing:.8px;text-transform:uppercase;margin-top:1px}
-.tc-img-wrap{width:100%;height:165px;position:relative;background:transparent;display:flex;align-items:center;justify-content:center;overflow:hidden}
+.tc-img-wrap{width:100%;height:118px;position:relative;background:transparent;display:flex;align-items:center;justify-content:center;overflow:hidden}
 .tc-glow{position:absolute;bottom:0;left:0;right:0;height:50px;background:radial-gradient(ellipse 90% 100% at 50% 100%,rgba(60,90,220,.2),transparent 70%);pointer-events:none}
-.tc-car{width:96%;height:100%;object-fit:contain;object-position:center 60%;filter:drop-shadow(0 14px 22px rgba(0,0,0,.65));pointer-events:none;user-select:none;position:relative;z-index:1}
-.tc-stats{padding:9px 13px 6px}
+.tc-car{width:78%;height:92%;object-fit:contain;object-position:center center;filter:drop-shadow(0 12px 18px rgba(0,0,0,.62));pointer-events:none;user-select:none;position:relative;z-index:1;transform:translateY(5px)}
+.tc-stats{padding:7px 11px 5px}
 .tc-batt-row{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:5px}
-.tc-pct{font-size:42px;font-weight:800;letter-spacing:-2.5px;line-height:1}
+.tc-pct{font-size:34px;font-weight:800;letter-spacing:-2px;line-height:1}
 .tc-pct span{font-size:16px;font-weight:400;color:rgba(255,255,255,.45);margin-left:2px}
 .tc-range{font-size:14px;font-weight:600;color:rgba(255,255,255,.58)}
-.tc-bar{height:4px;background:rgba(255,255,255,.12);border-radius:2px;margin-bottom:10px;overflow:hidden}
+.tc-bar{height:3px;background:rgba(255,255,255,.12);border-radius:2px;margin-bottom:7px;overflow:hidden}
 .tc-fill{height:100%;border-radius:2px;transition:width .4s}
 .tc-clim-row{display:flex;justify-content:space-between;align-items:center}
 .tc-clim-left{display:flex;align-items:center;gap:9px}
@@ -1347,8 +1347,8 @@ button.is-pressed{transform:scale(.93)!important;filter:brightness(1.2)}
 .tc-tbtn{width:30px;height:30px;border-radius:50%;background:rgba(255,255,255,.1);border:1px solid rgba(255,255,255,.18)!important;display:flex;align-items:center;justify-content:center;font-size:20px;line-height:1;color:rgba(255,255,255,.82);transition:all .15s;flex-shrink:0}
 .tc-tbtn:hover{background:rgba(255,255,255,.17)}
 .tc-tval{font-size:15px;font-weight:600;color:rgba(255,255,255,.82);min-width:36px;text-align:center}
-.tc-btns{display:grid;grid-template-columns:repeat(5,1fr);gap:4px;padding:8px 10px;border-top:1px solid rgba(255,255,255,.07)}
-.tb{padding:7px 3px;text-align:center;transition:all .18s,transform .08s;border-radius:9px;border:1px solid rgba(255,255,255,.1);background:rgba(255,255,255,.06)}
+.tc-btns{display:grid;grid-template-columns:repeat(5,1fr);gap:4px;padding:6px 9px;border-top:1px solid rgba(255,255,255,.07)}
+.tb{padding:6px 3px;text-align:center;transition:all .18s,transform .08s;border-radius:8px;border:1px solid rgba(255,255,255,.1);background:rgba(255,255,255,.06)}
 .tb:hover{background:rgba(255,255,255,.1)}
 .tb.on{background:rgba(167,139,250,.16);border-color:rgba(167,139,250,.42);box-shadow:0 0 9px rgba(167,139,250,.22)}
 .tb ha-icon{display:block;--mdc-icon-size:14px;color:rgba(255,255,255,.5);margin:0 auto 3px}
@@ -1383,9 +1383,9 @@ button.is-pressed{transform:scale(.93)!important;filter:brightness(1.2)}
 .wx-precip{font-size:8px;color:rgba(96,165,250,.75);margin-top:3px;font-weight:600}
 
 /* Spotify */
-.sp2{padding:10px 11px;display:flex;gap:11px;align-items:flex-start}
-.sp-art{width:78px;height:78px;border-radius:9px;object-fit:cover;flex-shrink:0;border:1px solid rgba(255,255,255,.12)}
-.sp-art-empty{width:78px;height:78px;border-radius:9px;flex-shrink:0;background:linear-gradient(145deg,rgba(29,185,84,.25),rgba(29,185,84,.06));border:1px solid rgba(29,185,84,.3);display:flex;align-items:center;justify-content:center}
+.sp2{padding:8px 10px;display:flex;gap:10px;align-items:flex-start}
+.sp-art{width:64px;height:64px;border-radius:8px;object-fit:cover;flex-shrink:0;border:1px solid rgba(255,255,255,.12)}
+.sp-art-empty{width:64px;height:64px;border-radius:8px;flex-shrink:0;background:linear-gradient(145deg,rgba(29,185,84,.25),rgba(29,185,84,.06));border:1px solid rgba(29,185,84,.3);display:flex;align-items:center;justify-content:center}
 .sp-art-empty ha-icon{--mdc-icon-size:32px;color:#1DB954}
 .sp-body{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px}
 .sp-track{font-size:13px;font-weight:800;color:rgba(255,255,255,.92);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;line-height:1.2}
@@ -1395,7 +1395,7 @@ button.is-pressed{transform:scale(.93)!important;filter:brightness(1.2)}
 .sp-prog-bar{height:3px;border-radius:3px;background:rgba(255,255,255,.12);overflow:hidden}
 .sp-prog-fill{height:100%;border-radius:3px;background:#1DB954;transition:width .5s linear}
 .sp-times{display:flex;justify-content:space-between;font-size:8px;color:rgba(255,255,255,.32);margin-top:2px}
-.sp-ctrl-row{display:flex;align-items:center;gap:5px;margin-top:6px}
+.sp-ctrl-row{display:flex;align-items:center;gap:5px;margin-top:4px}
 .sp-btn{background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.1)!important;border-radius:8px;padding:5px 8px;display:flex;align-items:center;justify-content:center;transition:all .15s,transform .08s}
 .sp-btn:hover{background:rgba(255,255,255,.14)}
 .sp-btn ha-icon{--mdc-icon-size:15px;color:rgba(255,255,255,.72)}
@@ -1407,7 +1407,7 @@ button.is-pressed{transform:scale(.93)!important;filter:brightness(1.2)}
 .sp-vol-lbl{font-size:9px;color:rgba(255,255,255,.42);min-width:26px;text-align:center}
 
 /* Spotify device strip */
-.sp-devices{display:flex;gap:8px;margin-top:7px;padding-top:7px;border-top:1px solid rgba(255,255,255,.07)}
+.sp-devices{display:flex;gap:8px;margin-top:5px;padding-top:5px;border-top:1px solid rgba(255,255,255,.07)}
 .sp-device{display:flex;align-items:center;gap:4px;flex:1;font-size:9px;color:rgba(255,255,255,.35);overflow:hidden}
 .sp-device ha-icon{flex-shrink:0;color:rgba(255,255,255,.35);transition:color .2s}
 .sp-device.on ha-icon{color:rgba(200,185,255,.8)}
@@ -1495,8 +1495,8 @@ button.is-pressed{transform:scale(.93)!important;filter:brightness(1.2)}
 .cam-btn{background:rgba(255,255,255,.07);border:1px solid rgba(255,255,255,.12)!important;border-radius:8px;padding:5px 9px;display:flex;align-items:center;gap:4px;font-size:9px;color:rgba(255,255,255,.6);font-weight:700}
 .cam-btn ha-icon{--mdc-icon-size:13px;color:rgba(255,255,255,.5)}
 .cam-btn:hover{background:rgba(255,255,255,.12)}
-.cam-wrap{border-radius:10px;overflow:hidden;background:rgba(0,0,0,.4);min-height:150px;display:flex;align-items:center;justify-content:center}
-.cam-feed{width:100%;height:auto;display:block;border-radius:10px}
+.cam-wrap{border-radius:10px;overflow:hidden;background:rgba(0,0,0,.4);min-height:170px;display:flex;align-items:center;justify-content:center}
+.cam-feed{width:100%;height:100%;min-height:170px;object-fit:cover;display:block;border-radius:10px}
 .cam-err{flex-direction:column;align-items:center;justify-content:center;gap:8px;padding:24px;color:rgba(255,255,255,.3);font-size:10px;text-align:center;min-height:150px}
 .cam-err ha-icon{--mdc-icon-size:28px}
 .cam-err small{font-size:8px;opacity:.7}
@@ -1505,11 +1505,12 @@ button.is-pressed{transform:scale(.93)!important;filter:brightness(1.2)}
 @media(max-width:840px){
   .ov-main,.g2{grid-template-columns:1fr}
   .rooms5{grid-template-columns:repeat(3,1fr)}
-  .tc-img-wrap{height:140px}
+  .tc-img-wrap{height:110px}
+  .tc-car{width:88%}
   .wx-forecast{grid-template-columns:repeat(3,1fr)}
   .media-strip{grid-template-columns:1fr}
   .sp2{flex-direction:column}
-  .sp-art,.sp-art-empty{width:100%;height:100px}
+  .sp-art,.sp-art-empty{width:100%;height:84px}
   .clim-row{grid-template-columns:1fr auto 1fr}
   .clim-row .clim-sep:last-of-type,.clim-row .aq-col{display:none}
 }
