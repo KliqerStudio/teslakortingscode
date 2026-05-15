@@ -150,6 +150,14 @@
       --app-drawer-width: 0px !important;
     }
 
+    home-assistant-main {
+      --ha-sidebar-width: 0px !important;
+      --mdc-top-app-bar-width: 100% !important;
+      --safe-area-content-inset-left: 0px !important;
+      margin-left: 0 !important;
+      padding-left: 0 !important;
+    }
+
     app-drawer-layout [main],
     #drawerLayout > [main],
     #main,
@@ -223,6 +231,18 @@
       tag === "hui-root" ||
       tag === "hui-view"
     ) {
+      if (tag === "home-assistant-main") {
+        el.setAttribute("modal", "");
+        el.removeAttribute("expanded");
+        el.style.setProperty("--ha-sidebar-width", "0px", "important");
+        el.style.setProperty("--mdc-top-app-bar-width", "100%", "important");
+        el.style.setProperty("--safe-area-content-inset-left", "0px", "important");
+        if (el.hass) {
+          el.hass.kioskMode = true;
+          el.hass.dockedSidebar = "always_hidden";
+          el.requestUpdate?.();
+        }
+      }
       el.style.setProperty("margin-left", "0", "important");
       el.style.setProperty("left", "0", "important");
       el.style.setProperty("width", "100%", "important");
