@@ -181,6 +181,7 @@ class GlassDashboardCard extends HTMLElement {
     const choices = [this.entities.spotify, this.entities.spotifySpeaker, this.entities.tv];
     return (
       choices.find(en => ["playing","paused"].includes(this.mediaState(en))) ||
+      [this.entities.tv, this.entities.spotifySpeaker].find(en => this.mediaState(en) === "on") ||
       this.entities.spotify
     );
   }
@@ -609,8 +610,11 @@ class GlassDashboardCard extends HTMLElement {
     const weatherVis      = this.attr(e.weather,"visibility",null);
 
     const mediaEntity   = this.mediaInfoEntity();
-    const spotifyTitle  = this.attr(mediaEntity,"media_title","") || this.attr(mediaEntity,"source","");
-    const spotifyArtist = this.attr(mediaEntity,"media_artist","") || this.attr(mediaEntity,"friendly_name","");
+    const spotifyTitle  = this.attr(mediaEntity,"media_title","")
+      || this.attr(mediaEntity,"source","")
+      || (mediaEntity === e.tv ? "TV" : "Spotify");
+    const spotifyArtist = this.attr(mediaEntity,"media_artist","")
+      || (mediaEntity === e.tv ? "LG webOS TV" : mediaEntity === e.spotifySpeaker ? "Dining Room" : "Ready");
     const spotifyAlbum  = this.attr(mediaEntity,"media_album_name","");
     const spotifyPic    = this.attr(mediaEntity,"entity_picture","") || this.attr(e.spotifySpeaker,"entity_picture","") || this.attr(e.tv,"entity_picture","");
     const spotifyState  = this.mediaState(e.spotify,"idle");
