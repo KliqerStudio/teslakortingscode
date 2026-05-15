@@ -4,6 +4,7 @@
  */
 (function () {
   const STYLE_ID = "kliqer-glass-dashboard-style";
+  const KIOSK_STYLE_ID = "kliqer-tablet-kiosk-style";
 
   const css = `
     :root,
@@ -121,8 +122,122 @@
     document.head.appendChild(style);
   }
 
+  function isTabletDashboard() {
+    return (
+      location.pathname.includes("/lovelace-apple") &&
+      !location.search.includes("disable_km")
+    );
+  }
+
+  const kioskCss = `
+    app-header,
+    app-toolbar,
+    ha-menu-button,
+    ha-sidebar,
+    home-assistant-sidebar,
+    app-drawer,
+    [drawer] {
+      display: none !important;
+      width: 0 !important;
+      min-width: 0 !important;
+      height: 0 !important;
+      min-height: 0 !important;
+      opacity: 0 !important;
+      pointer-events: none !important;
+    }
+
+    app-drawer-layout {
+      --app-drawer-width: 0px !important;
+    }
+
+    app-drawer-layout [main],
+    #drawerLayout > [main],
+    #main,
+    #content,
+    .content,
+    partial-panel-resolver,
+    ha-panel-lovelace {
+      margin-left: 0 !important;
+      left: 0 !important;
+      width: 100% !important;
+      max-width: none !important;
+    }
+  `;
+
+  function injectKioskStyle(root) {
+    const target = root.head || root;
+    if (
+      !target ||
+      root.getElementById?.(KIOSK_STYLE_ID) ||
+      target.querySelector?.(`#${KIOSK_STYLE_ID}`)
+    ) {
+      return;
+    }
+
+    const style = document.createElement("style");
+    style.id = KIOSK_STYLE_ID;
+    style.textContent = kioskCss;
+    target.appendChild(style);
+  }
+
+  function visitShadowRoots(root, seen = new Set()) {
+    if (!root || seen.has(root)) return;
+    seen.add(root);
+    injectKioskStyle(root);
+
+    root.querySelectorAll?.("*").forEach((el) => {
+      if (el.shadowRoot) visitShadowRoots(el.shadowRoot, seen);
+    });
+  }
+
+  function removeKioskStyles(root = document, seen = new Set()) {
+    if (!root || seen.has(root)) return;
+    seen.add(root);
+
+    root.getElementById?.(KIOSK_STYLE_ID)?.remove();
+    root.querySelector?.(`#${KIOSK_STYLE_ID}`)?.remove();
+    root.querySelectorAll?.("*").forEach((el) => {
+      if (el.shadowRoot) removeKioskStyles(el.shadowRoot, seen);
+    });
+  }
+
+  function forceKioskLayout() {
+    if (!isTabletDashboard()) {
+      document.documentElement.classList.remove("kliqer-tablet-kiosk");
+      removeKioskStyles();
+      return;
+    }
+
+    document.documentElement.classList.add("kliqer-tablet-kiosk");
+    visitShadowRoots(document);
+
+    document.querySelectorAll?.("app-drawer-layout").forEach((layout) => {
+      layout.setAttribute("force-narrow", "");
+      layout.style.setProperty("--app-drawer-width", "0px", "important");
+    });
+  }
+
   if (document.head) inject();
   else document.addEventListener("DOMContentLoaded", inject);
 
-  window.addEventListener("location-changed", inject);
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", forceKioskLayout);
+  } else {
+    forceKioskLayout();
+  }
+
+  const observer = new MutationObserver(forceKioskLayout);
+  observer.observe(document.documentElement, { childList: true, subtree: true });
+
+  let tries = 0;
+  const kioskTimer = window.setInterval(() => {
+    forceKioskLayout();
+    tries += 1;
+    if (tries > 24) window.clearInterval(kioskTimer);
+  }, 500);
+
+  window.addEventListener("location-changed", () => {
+    inject();
+    forceKioskLayout();
+  });
 })();
