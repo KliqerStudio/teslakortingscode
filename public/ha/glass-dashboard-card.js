@@ -132,40 +132,55 @@ class GlassDashboardCard extends HTMLElement {
   // ── Data Loading ─────────────────────────────────────────────────────────────
   async loadForecast() {
     if (this._forecastLoading) return;
-    // If we have data, cache for 30 min. If empty, retry every 30 seconds.
     if (this._forecast?.length && Date.now() - this._forecastLoadedAt < 1800000) return;
     if (!this._forecast?.length && this._forecastLoadedAt && Date.now() - this._forecastLoadedAt < 30000) return;
     this._forecastLoading = true;
+    // Safety timeout — ensure flag never gets stuck
+    const safetyTimer = setTimeout(() => { this._forecastLoading = false; }, 12000);
     try {
+      // Attempt 1: WebSocket API
       if (this._hass?.callWS) {
-        const data = await this._hass.callWS({
-          type: "weather/get_forecasts",
-          entity_id: this.entities.weather,
-          forecast_type: "daily",
-        });
-        // Handle both response shapes
-        this._forecast = data?.[this.entities.weather]?.forecast
-          || data?.response?.[this.entities.weather]?.forecast
-          || [];
+        try {
+          const data = await this._hass.callWS({
+            type: "weather/get_forecasts",
+            entity_id: this.entities.weather,
+            forecast_type: "daily",
+          });
+          this._forecast = data?.[this.entities.weather]?.forecast
+            || data?.response?.[this.entities.weather]?.forecast
+            || [];
+        } catch(wsErr) { console.warn("[GlassDash] Forecast WS failed:", wsErr); }
       }
-      // Fallback: read forecast attribute directly from entity state
+
+      // Attempt 2: REST service call (HA 2023.9+)
+      if (!this._forecast?.length && this._hass?.fetchWithAuth) {
+        try {
+          const resp = await this._hass.fetchWithAuth(
+            "/api/services/weather/get_forecasts?return_response=true",
+            { method:"POST", headers:{"Content-Type":"application/json"},
+              body: JSON.stringify({ entity_id: this.entities.weather, type: "daily" }) }
+          );
+          if (resp.ok) {
+            const json = await resp.json();
+            this._forecast = json?.service_response?.[this.entities.weather]?.forecast || [];
+          }
+        } catch(restErr) { console.warn("[GlassDash] Forecast REST failed:", restErr); }
+      }
+
+      // Attempt 3: state attribute fallback
       if (!this._forecast?.length) {
         const raw = this.attr(this.entities.weather, "forecast", null);
         if (Array.isArray(raw) && raw.length) this._forecast = raw;
       }
+
       this._forecastLoadedAt = Date.now();
       if (this._forecast.length) this.render();
+      else this.render(); // still re-render to show retry button
     } catch(err) {
       console.warn("[GlassDash] Forecast error:", err);
-      const raw = this.attr(this.entities.weather, "forecast", null);
-      if (Array.isArray(raw) && raw.length) {
-        this._forecast = raw;
-        this._forecastLoadedAt = Date.now();
-        this.render();
-      } else {
-        this._forecastLoadedAt = Date.now(); // still stamp so we throttle retries
-      }
+      this._forecastLoadedAt = Date.now();
     } finally {
+      clearTimeout(safetyTimer);
       this._forecastLoading = false;
     }
   }
@@ -173,28 +188,52 @@ class GlassDashboardCard extends HTMLElement {
   async loadHistory() {
     if (this._historyLoading) return;
     if (this._historyLoadedAt && Date.now() - this._historyLoadedAt < 300000) return;
-    if (!this._hass?.callWS) return;
+    if (!this._hass) return;
     this._historyLoading = true;
     const sensors = [
       this.entities.livingTemp, this.entities.livingHumidity, this.entities.livingAir,
       this.entities.bedTemp,    this.entities.bedHumidity,    this.entities.bedAir,
     ];
     try {
-      const start = new Date(Date.now() - 3 * 3600 * 1000).toISOString();
+      // Primary: REST API via fetchWithAuth (most reliable, no format surprises)
+      const start = new Date(Date.now() - 4 * 3600 * 1000).toISOString();
+      const url = `/api/history/period/${encodeURIComponent(start)}?filter_entity_id=${sensors.join(",")}&minimal_response=true&no_attributes=true`;
+      const resp = await this._hass.fetchWithAuth(url);
+      if (resp.ok) {
+        const data = await resp.json(); // array of arrays, in same order as filter_entity_id
+        if (Array.isArray(data)) {
+          // Map each array back to its entity by position
+          data.forEach((entityHistory, idx) => {
+            if (Array.isArray(entityHistory) && entityHistory.length > 0) {
+              const entityId = entityHistory[0]?.entity_id || sensors[idx];
+              if (entityId) this._history[entityId] = entityHistory;
+            }
+          });
+          this._historyLoadedAt = Date.now();
+          this.render();
+          return;
+        }
+      }
+    } catch(e) { console.warn("[GlassDash] History REST failed:", e); }
+
+    // Fallback: WebSocket API
+    try {
+      const start = new Date(Date.now() - 4 * 3600 * 1000).toISOString();
       const data = await this._hass.callWS({
         type: "history/history_during_period",
         entity_ids: sensors,
         start_time: start,
         significant_changes_only: false,
-        minimal_response: true,
+        minimal_response: false,
         no_attributes: true,
       });
-      if (data) {
-        this._history = data;
+      if (data && typeof data === "object") {
+        // WebSocket returns {entity_id: [...states]}
+        Object.assign(this._history, data);
         this._historyLoadedAt = Date.now();
         this.render();
       }
-    } catch { /* sparklines silently skipped */ }
+    } catch(e) { console.warn("[GlassDash] History WS failed:", e); }
     finally { this._historyLoading = false; }
   }
 
@@ -328,6 +367,16 @@ class GlassDashboardCard extends HTMLElement {
     const h = new Date().getHours();
     return h < 12 ? "Good morning" : h < 18 ? "Good afternoon" : "Good evening";
   }
+  toggleFullscreen() {
+    if (!document.fullscreenElement) {
+      (document.documentElement.requestFullscreen || document.documentElement.webkitRequestFullscreen)
+        ?.call(document.documentElement)?.catch(() => {});
+    } else {
+      (document.exitFullscreen || document.webkitExitFullscreen)?.call(document)?.catch(() => {});
+    }
+    // Re-render after a tick so the icon updates
+    setTimeout(() => this.render(), 120);
+  }
 
   // ── Main Render ───────────────────────────────────────────────────────────────
   render() {
@@ -381,9 +430,14 @@ class GlassDashboardCard extends HTMLElement {
       <div class="home-lbl">${this.greeting()}</div>
       <div class="home-sub">Home overview</div>
     </div>
-    <div class="clock-wrap">
-      <div class="clk-time" id="clk-t">00:00</div>
-      <div class="clk-date" id="clk-d">Thu, 14 May</div>
+    <div class="topbar-right">
+      <button class="fs-btn" data-action="fullscreen" title="Toggle fullscreen">
+        <ha-icon icon="mdi:${document.fullscreenElement ? 'fullscreen-exit' : 'fullscreen'}"></ha-icon>
+      </button>
+      <div class="clock-wrap">
+        <div class="clk-time" id="clk-t">00:00</div>
+        <div class="clk-date" id="clk-d">Thu, 14 May</div>
+      </div>
     </div>
   </div>
 
@@ -518,6 +572,15 @@ class GlassDashboardCard extends HTMLElement {
     });
 
     this.shadowRoot.querySelector("[data-action='cam-refresh']")?.addEventListener("click", () => this.updateCamera());
+
+    this.shadowRoot.querySelector("[data-action='fullscreen']")?.addEventListener("click", () => this.toggleFullscreen());
+
+    this.shadowRoot.querySelector("[data-action='forecast-retry']")?.addEventListener("click", () => {
+      this._forecastLoadedAt = 0; // reset cache to force immediate reload
+      this._forecast = [];
+      this.loadForecast();
+      this.render(); // show "Loading…" while we wait
+    });
   }
 
   // ── Component Builders ────────────────────────────────────────────────────────
@@ -665,7 +728,7 @@ class GlassDashboardCard extends HTMLElement {
             <div class="wxdl">${lo}°</div>
           </div>`;
         }).join("")
-      : `<div class="wx-nof">Loading forecast…</div>`;
+      : `<div class="wx-nof"><span>${this._forecastLoading ? "Loading forecast…" : "Forecast unavailable"}</span>${!this._forecastLoading ? `<button class="wx-retry" data-action="forecast-retry"><ha-icon icon="mdi:refresh"></ha-icon> Retry</button>` : ""}</div>`;
 
     const extras = [
       feels!=null ? {icon:"mdi:thermometer-lines",val:`${Math.round(feels)}°`,lbl:"Feels like"} : null,
@@ -699,7 +762,7 @@ class GlassDashboardCard extends HTMLElement {
     const on   = this.isOn(entity);
     const isLt = entity.startsWith("light.");
     const braw = isLt ? this.attr(entity,"brightness",null) : null;
-    const bPct = braw !== null ? Math.round(braw / 255 * 100) : null;
+    const bPct = braw !== null ? Math.max(1, Math.round(braw / 255 * 100)) : (on ? 100 : null);
     const icon = isLt ? (on?"mdi:lightbulb":"mdi:lightbulb-outline")
                : entity.includes("feeder") ? "mdi:food-drumstick-outline"
                : "mdi:toggle-switch-outline";
@@ -866,9 +929,13 @@ button{font:inherit;color:inherit;border:0;text-align:inherit;cursor:pointer;bac
 .topbar{display:flex;align-items:center;justify-content:space-between;padding:10px 16px 6px}
 .home-lbl{font-size:12px;font-weight:700;color:rgba(255,255,255,.55);letter-spacing:1.4px;text-transform:uppercase}
 .home-sub{font-size:9px;color:rgba(255,255,255,.32);margin-top:1px}
+.topbar-right{display:flex;align-items:center;gap:9px}
 .clock-wrap{text-align:right}
 .clk-time{font-size:22px;font-weight:200;color:rgba(255,255,255,.92);letter-spacing:-1px;line-height:1}
 .clk-date{font-size:10px;color:rgba(255,255,255,.5);margin-top:1px}
+.fs-btn{display:flex;align-items:center;justify-content:center;width:30px;height:30px;border-radius:50%;background:rgba(255,255,255,.07);border:1px solid rgba(255,255,255,.12)!important;transition:all .15s,transform .08s;flex-shrink:0}
+.fs-btn:hover{background:rgba(255,255,255,.13)}
+.fs-btn ha-icon{--mdc-icon-size:16px;color:rgba(255,255,255,.6)}
 
 /* Tabs */
 .tabs{display:flex;gap:4px;padding:0 12px 7px;overflow-x:auto;scrollbar-width:none}
@@ -978,7 +1045,10 @@ button.is-pressed{transform:scale(.93)!important;filter:brightness(1.2)}
 .wx-det-lbl{font-size:8px;color:rgba(255,255,255,.4);text-transform:uppercase;letter-spacing:.4px;text-align:center}
 .wx-sep{height:1px;background:rgba(255,255,255,.08);margin:9px 0}
 .wx-forecast{display:grid;grid-template-columns:repeat(5,1fr);gap:6px}
-.wx-nof{color:rgba(255,255,255,.28);font-size:10px;padding:10px;text-align:center}
+.wx-nof{display:flex;align-items:center;justify-content:center;gap:10px;color:rgba(255,255,255,.28);font-size:10px;padding:10px;text-align:center}
+.wx-retry{display:flex;align-items:center;gap:4px;background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.14)!important;border-radius:8px;padding:4px 9px;font-size:9px;font-weight:700;color:rgba(255,255,255,.55);cursor:pointer;transition:all .15s}
+.wx-retry:hover{background:rgba(255,255,255,.13)}
+.wx-retry ha-icon{--mdc-icon-size:11px}
 .wx-day{text-align:center;padding:8px 4px}
 .wxdn{font-size:8px;color:rgba(255,255,255,.46);text-transform:uppercase;letter-spacing:.5px;margin-bottom:5px}
 .wxdi{--mdc-icon-size:18px;color:rgba(255,255,255,.62);margin-bottom:4px;display:block}

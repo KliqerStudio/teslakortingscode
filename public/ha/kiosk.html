@@ -1,0 +1,129 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="Home">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="theme-color" content="#060818">
+  <link rel="manifest" href="/ha/manifest.json">
+  <title>Home Dashboard</title>
+  <style>
+    *{box-sizing:border-box;margin:0;padding:0}
+    html,body{
+      width:100%;height:100%;
+      background:#060818;
+      font-family:-apple-system,BlinkMacSystemFont,"SF Pro Display",system-ui,sans-serif;
+      overflow:hidden;
+      color:#fff;
+    }
+    .bg{
+      position:fixed;inset:0;
+      background:
+        radial-gradient(ellipse 80% 60% at 15% 85%,rgba(0,180,255,.42),transparent 55%),
+        radial-gradient(ellipse 60% 50% at 80% 10%,rgba(130,60,255,.38),transparent 55%),
+        linear-gradient(160deg,#06091c 0%,#0b0630 40%,#050c1e 100%);
+      pointer-events:none;
+    }
+    .wrap{
+      position:relative;z-index:1;
+      display:flex;flex-direction:column;align-items:center;justify-content:center;
+      height:100%;gap:32px;padding:24px;text-align:center;
+    }
+    .logo{
+      width:72px;height:72px;border-radius:20px;
+      background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.14);
+      display:flex;align-items:center;justify-content:center;
+      font-size:36px;backdrop-filter:blur(20px);
+      box-shadow:0 0 40px rgba(100,60,255,.3);
+    }
+    h1{font-size:26px;font-weight:200;letter-spacing:-.5px;color:rgba(255,255,255,.9)}
+    .sub{font-size:12px;color:rgba(255,255,255,.35);letter-spacing:.3px}
+    .launch{
+      display:flex;align-items:center;gap:10px;
+      background:rgba(167,139,250,.18);border:1px solid rgba(167,139,250,.38);
+      border-radius:16px;padding:14px 28px;font-size:15px;font-weight:700;
+      color:rgba(200,185,255,.92);cursor:pointer;letter-spacing:.2px;
+      transition:all .18s;backdrop-filter:blur(20px);
+    }
+    .launch:hover{background:rgba(167,139,250,.28);transform:scale(1.03)}
+    .launch:active{transform:scale(.97)}
+    .launch svg{width:20px;height:20px;fill:currentColor;opacity:.8}
+    .hint{
+      font-size:10px;color:rgba(255,255,255,.22);letter-spacing:.3px;
+      max-width:240px;line-height:1.6;
+    }
+    .status{
+      position:fixed;bottom:24px;left:0;right:0;text-align:center;
+      font-size:10px;color:rgba(255,255,255,.2);letter-spacing:.4px;
+    }
+  </style>
+</head>
+<body>
+<div class="bg"></div>
+<div class="wrap">
+  <div class="logo">🏠</div>
+  <div>
+    <h1>Home Dashboard</h1>
+    <div class="sub" id="addr"></div>
+  </div>
+  <button class="launch" id="btn">
+    <svg viewBox="0 0 24 24"><path d="M10 20v-6h4v6h5v-8h3L12 3 2 12h3v8z"/></svg>
+    Open Dashboard
+  </button>
+  <div class="hint" id="hint">
+    Add this page to your Home Screen for a fullscreen kiosk experience.
+  </div>
+</div>
+<div class="status" id="status"></div>
+
+<script>
+  const HA_URL = "http://192.168.0.108:8123";
+  // Change this to your Lovelace dashboard path if you have a custom one:
+  const DASH_PATH = "/lovelace/home";
+
+  document.getElementById("addr").textContent = HA_URL.replace("http://","");
+  document.getElementById("btn").addEventListener("click", launch);
+
+  // Detect standalone (PWA) mode
+  const isStandalone = window.matchMedia("(display-mode: standalone)").matches
+    || window.navigator.standalone === true;
+
+  if (isStandalone) {
+    // In kiosk/PWA mode — go fullscreen and redirect automatically
+    document.getElementById("hint").textContent = "Launching dashboard…";
+    document.getElementById("status").textContent = "Kiosk mode";
+    goFullscreen();
+    setTimeout(launch, 800);
+  }
+
+  function launch() {
+    goFullscreen();
+    window.location.href = HA_URL + DASH_PATH;
+  }
+
+  function goFullscreen() {
+    const el = document.documentElement;
+    try {
+      (el.requestFullscreen || el.webkitRequestFullscreen || el.mozRequestFullScreen)
+        ?.call(el);
+    } catch(e) {}
+  }
+
+  // Wake lock — prevent tablet from sleeping while in kiosk mode
+  async function keepAwake() {
+    try {
+      if ("wakeLock" in navigator) {
+        await navigator.wakeLock.request("screen");
+      }
+    } catch(e) {}
+  }
+  keepAwake();
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "visible") keepAwake();
+  });
+</script>
+</body>
+</html>
