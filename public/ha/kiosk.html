@@ -81,10 +81,14 @@
 
 <script>
   const HA_URL = "http://192.168.0.108:8123";
-  // Change this to your Lovelace dashboard path if you have a custom one:
+  // Change to your Lovelace dashboard path:
   const DASH_PATH = "/lovelace/home";
+  // ?kiosk hides the HA sidebar — requires the "kiosk-mode" HACS integration.
+  // Install it via HACS → Integrations → search "kiosk mode" by NemesisRE.
+  // If you don't have it, change KIOSK_PARAM to "" to skip.
+  const KIOSK_PARAM = "?kiosk";
 
-  document.getElementById("addr").textContent = HA_URL.replace("http://","");
+  document.getElementById("addr").textContent = HA_URL.replace("http://","") + DASH_PATH + KIOSK_PARAM;
   document.getElementById("btn").addEventListener("click", launch);
 
   // Detect standalone (PWA) mode
@@ -101,7 +105,7 @@
 
   function launch() {
     goFullscreen();
-    window.location.href = HA_URL + DASH_PATH;
+    window.location.href = HA_URL + DASH_PATH + KIOSK_PARAM;
   }
 
   function goFullscreen() {

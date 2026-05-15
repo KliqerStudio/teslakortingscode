@@ -45,6 +45,11 @@ class GlassDashboardCard extends HTMLElement {
       teslaChargePort:"cover.model_3_charge_port_door",
       teslaFrunk:     "cover.model_3_froot",
       teslaBoot:      "cover.model_3_boot",
+      // P1 smart meter — adjust to match your HA integration (DSMR / Homewizard / etc.)
+      p1Power:        "sensor.dsmr_reading_electricity_currently_delivered",
+      p1Return:       "sensor.dsmr_reading_electricity_currently_returned",
+      p1Gas:          "sensor.dsmr_reading_gas_meter_reading",
+      p1EnergyToday:  "sensor.dsmr_day_consumption_electricity_merged",
       spotify:        "media_player.spotify_tristan_pahud_de_mortanges",
       spotifySpeaker: "media_player.dining_room",
       tv:             "media_player.lg_webos_tv_oled65c54la_2",
@@ -193,6 +198,7 @@ class GlassDashboardCard extends HTMLElement {
     const sensors = [
       this.entities.livingTemp, this.entities.livingHumidity, this.entities.livingAir,
       this.entities.bedTemp,    this.entities.bedHumidity,    this.entities.bedAir,
+      this.entities.p1Power,    this.entities.p1Return,
     ];
     try {
       // Primary: REST API via fetchWithAuth (most reliable, no format surprises)
@@ -455,7 +461,7 @@ class GlassDashboardCard extends HTMLElement {
   <div class="page page-ov ${this._tab==="ov"?"active":""} z1">
     <div class="ov-main">
 
-      <!-- LEFT: lights + climate + spotify + media -->
+      <!-- LEFT: lights + climate + P1 meter + media -->
       <div class="col">
         <section class="gl block">
           <div class="slbl">Lights</div>
@@ -473,7 +479,7 @@ class GlassDashboardCard extends HTMLElement {
         </section>
         ${this.climateSummary("Living Room · Climate",e.livingTemp,e.livingHumidity,e.livingAir)}
         ${this.climateSummary("Bedroom · Climate",e.bedTemp,e.bedHumidity,e.bedAir)}
-        ${this.spotifySection(spotifyPic,spotifyTitle,spotifyArtist,spotifyAlbum,spotifyActive,spotifyPlaying,curPos,durSec,spProg,volPct)}
+        ${this.p1Section()}
         <section class="gl media-strip">
           <div class="media-item">
             <ha-icon icon="mdi:television"></ha-icon>
@@ -486,9 +492,10 @@ class GlassDashboardCard extends HTMLElement {
         </section>
       </div>
 
-      <!-- RIGHT: Tesla only -->
+      <!-- RIGHT: Tesla + Spotify -->
       <div class="col">
         ${this.teslaCard(batteryRaw,range,teslaPlace,climOn,targetTemp)}
+        ${this.spotifySection(spotifyPic,spotifyTitle,spotifyArtist,spotifyAlbum,spotifyActive,spotifyPlaying,curPos,durSec,spProg,volPct)}
       </div>
     </div>
     ${this.weatherSection(weatherState,weatherTemp,weatherHumidity,weatherWind,weatherFeels,weatherUV,weatherVis)}
@@ -631,6 +638,66 @@ class GlassDashboardCard extends HTMLElement {
           <div class="aq-dot" style="background:${aqc};box-shadow:0 0 9px ${aqc}99"></div>
           ${valHtml}
           <div class="cl" style="color:${aqc}bb">${aqLbl} · Air</div>
+        </div>
+      </div>
+    </section>`;
+  }
+
+  p1Section() {
+    const e = this.entities;
+    const rawPower  = this.st(e.p1Power, "--");
+    const rawReturn = this.st(e.p1Return, "0");
+    const rawGas    = this.st(e.p1Gas, "--");
+    const rawToday  = this.st(e.p1EnergyToday, "--");
+
+    const powerW  = Number(rawPower);
+    const returnW = Number(rawReturn);
+    const isNum   = Number.isFinite(powerW);
+
+    // Watt → kW display when ≥1000 W
+    const powerDisp  = isNum
+      ? (powerW >= 1000 ? (powerW/1000).toFixed(2)+" kW" : Math.round(powerW)+" W")
+      : rawPower;
+    const returnDisp = Number.isFinite(returnW) && returnW > 0
+      ? (returnW >= 1000 ? (returnW/1000).toFixed(2)+" kW" : Math.round(returnW)+" W")
+      : null;
+
+    const gasNum   = Number(rawGas);
+    const gasDisp  = Number.isFinite(gasNum) ? gasNum.toFixed(1) : rawGas;
+    const todayNum = Number(rawToday);
+    const todayDisp= Number.isFinite(todayNum) ? todayNum.toFixed(2) : rawToday;
+
+    // Colour: green when returning solar, amber when consuming moderately, red when high
+    const powerColor = returnDisp
+      ? "#34d399"
+      : isNum && powerW < 500 ? "#34d399"
+      : isNum && powerW < 1500 ? "#fbbf24"
+      : "#f87171";
+
+    return `<section class="gl block p1-section">
+      <div class="slbl">Energy · P1 Meter</div>
+      <div class="p1-main">
+        <div class="p1-power-col">
+          <div class="p1-label">${returnDisp ? "Solar Return" : "Live Usage"}</div>
+          <div class="p1-value" style="color:${powerColor}">${returnDisp || powerDisp}</div>
+          ${returnDisp ? `<div class="p1-import">consuming ${powerDisp}</div>` : ""}
+          <div class="p1-spark">${this.sparkline(returnDisp ? e.p1Return : e.p1Power, powerColor)}</div>
+        </div>
+        <div class="p1-stats">
+          <div class="p1-stat">
+            <ha-icon icon="mdi:flash" style="--mdc-icon-size:13px;color:#fbbf24;opacity:.8"></ha-icon>
+            <div>
+              <div class="p1-stat-val">${todayDisp}<span class="p1-unit"> kWh</span></div>
+              <div class="p1-stat-lbl">Today</div>
+            </div>
+          </div>
+          <div class="p1-stat">
+            <ha-icon icon="mdi:fire" style="--mdc-icon-size:13px;color:#f97316;opacity:.8"></ha-icon>
+            <div>
+              <div class="p1-stat-val">${gasDisp}<span class="p1-unit"> m³</span></div>
+              <div class="p1-stat-lbl">Gas</div>
+            </div>
+          </div>
         </div>
       </div>
     </section>`;
@@ -1120,6 +1187,21 @@ button.is-pressed{transform:scale(.93)!important;filter:brightness(1.2)}
 .li-slider{-webkit-appearance:none;appearance:none;flex:1;height:3px;border-radius:3px;background:rgba(167,139,250,.25);outline:none;cursor:pointer}
 .li-slider::-webkit-slider-thumb{-webkit-appearance:none;width:15px;height:15px;border-radius:50%;background:rgba(200,185,255,.92);cursor:pointer;box-shadow:0 1px 5px rgba(0,0,0,.35)}
 .li-slider::-moz-range-thumb{width:15px;height:15px;border-radius:50%;background:rgba(200,185,255,.92);cursor:pointer;border:0}
+
+/* P1 Energy meter */
+.p1-section{padding:10px}
+.p1-main{display:flex;gap:10px;align-items:flex-start}
+.p1-power-col{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px}
+.p1-label{font-size:8px;font-weight:700;color:rgba(255,255,255,.35);text-transform:uppercase;letter-spacing:.7px;margin-bottom:2px}
+.p1-value{font-size:26px;font-weight:300;letter-spacing:-1px;line-height:1.05}
+.p1-import{font-size:8px;color:rgba(255,255,255,.35);margin-top:1px}
+.p1-spark{width:100%;height:28px;margin-top:5px;overflow:hidden}
+.p1-stats{display:flex;flex-direction:column;gap:6px;flex-shrink:0;min-width:84px}
+.p1-stat{display:flex;align-items:center;gap:7px;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.08);border-radius:9px;padding:7px 9px}
+.p1-stat ha-icon{flex-shrink:0}
+.p1-stat-val{font-size:13px;font-weight:600;color:rgba(255,255,255,.88);line-height:1}
+.p1-unit{font-size:9px;color:rgba(255,255,255,.4);font-weight:400}
+.p1-stat-lbl{font-size:8px;color:rgba(255,255,255,.38);text-transform:uppercase;letter-spacing:.4px;margin-top:2px}
 
 /* Climate detail */
 .cd-full{grid-column:span 2;padding:7px 10px;display:flex;align-items:center;justify-content:space-between;color:rgba(255,255,255,.38);font-size:10px;border-radius:10px;background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.07)}
