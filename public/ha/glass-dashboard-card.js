@@ -14,6 +14,10 @@ class GlassDashboardCard extends HTMLElement {
     this._historyLoadedAt = 0;
     this._lastCamUrl = "";
     this._camFetching = false;
+    this._lastSig = "";
+    this._renderDebounce = null;
+    this._energy = { prefs: null, stats: {}, period: "day", loadedAt: {}, loading: false };
+    this._energyRate = 0.29; // €/kWh — change to match your contract
     this.entities = {
       mainLights: [
         "light.lounge_light","light.living_room","light.reading_light",
@@ -76,8 +80,35 @@ class GlassDashboardCard extends HTMLElement {
     this._hass = hass;
     this.loadForecast();
     this.loadHistory();
-    this.render();
+    this.loadEnergy();
+    // Only re-render when relevant entity states actually changed.
+    // This prevents the Tesla image (and everything else) from flickering
+    // every time HA sends ANY state update (which can be every few seconds).
+    const sig = this._stateSig();
+    if (sig !== this._lastSig) {
+      this._lastSig = sig;
+      clearTimeout(this._renderDebounce);
+      this._renderDebounce = setTimeout(() => this.render(), 100);
+    }
     if (!this._timer) this._timer = window.setInterval(() => this.updateClock(), 10000);
+  }
+
+  _stateSig() {
+    if (!this._hass) return "";
+    const e = this.entities;
+    const watch = [
+      ...e.mainLights, ...e.bedroomLights, ...e.gameLights, ...e.utilityLights,
+      e.livingTemp, e.livingHumidity, e.livingAir,
+      e.bedTemp, e.bedHumidity, e.bedAir, e.weather,
+      e.teslaClimate, e.teslaBattery, e.teslaRange, e.teslaLocation,
+      e.teslaDefrost, e.teslaSentry, e.teslaCharge,
+      e.spotify, e.spotifySpeaker, e.tv,
+      e.p1Power, e.p1Return,
+    ];
+    return watch.map(k => {
+      const s = this._hass.states?.[k];
+      return s ? `${s.state}|${s.last_changed}` : "";
+    }).join("~");
   }
 
   getCardSize() { return 14; }
@@ -242,6 +273,82 @@ class GlassDashboardCard extends HTMLElement {
       }
     } catch(e) { console.warn("[GlassDash] History WS failed:", e); }
     finally { this._historyLoading = false; }
+  }
+
+  async loadEnergy() {
+    if (this._energy.loading) return;
+    if (!this._hass?.callWS) return;
+    this._energy.loading = true;
+    try {
+      // Step 1: Discover which entities HA Energy dashboard is configured to track
+      if (!this._energy.prefs) {
+        try { this._energy.prefs = await this._hass.callWS({ type: "energy/get_prefs" }); }
+        catch(e) { console.warn("[GlassDash] Energy prefs:", e); }
+      }
+      const prefs = this._energy.prefs;
+      let consumptionIds = [], costIds = [];
+      if (prefs?.energy_sources) {
+        for (const src of prefs.energy_sources) {
+          if (src.type === "grid" && src.flow_from) {
+            src.flow_from.forEach(f => {
+              if (f.stat_energy_from) consumptionIds.push(f.stat_energy_from);
+              if (f.stat_cost)        costIds.push(f.stat_cost);
+            });
+          }
+        }
+      }
+      if (!consumptionIds.length) return; // Energy not configured in HA
+      this._energy.consumptionIds = consumptionIds;
+      this._energy.costIds        = costIds;
+
+      const period   = this._energy.period;
+      const now      = Date.now();
+      const cacheTtl = period === "day" ? 300000 : 900000;
+      const dayStale = !this._energy.loadedAt["day"] || now - this._energy.loadedAt["day"] > 300000;
+      const periodStale = !this._energy.loadedAt[period] || now - this._energy.loadedAt[period] > cacheTtl;
+      if (!dayStale && !periodStale && this._energy.stats[period]) return;
+
+      const end = new Date();
+
+      // Always keep today's hourly data fresh (for live kWh + cost totals)
+      if (dayStale || !this._energy.stats["day"]) {
+        const todayStart = new Date(end.getFullYear(), end.getMonth(), end.getDate());
+        const dayData = await this._hass.callWS({
+          type: "recorder/statistics_during_period",
+          start_time: todayStart.toISOString(),
+          end_time:   end.toISOString(),
+          statistic_ids: [...consumptionIds, ...costIds],
+          period: "hour",
+          units: { energy: "kWh" },
+          types: ["change"],
+        });
+        this._energy.stats["day"]        = { data: dayData, statPeriod: "hour" };
+        this._energy.loadedAt["day"]     = now;
+      }
+
+      // Fetch the selected period if it differs from day
+      if (period !== "day" && periodStale) {
+        let start, statPeriod;
+        switch (period) {
+          case "week":  start = new Date(now - 6*86400000); start.setHours(0,0,0,0); statPeriod = "day";   break;
+          case "month": start = new Date(end.getFullYear(), end.getMonth(), 1);       statPeriod = "day";   break;
+          default:      start = new Date(end.getFullYear(), 0, 1);                    statPeriod = "month"; break;
+        }
+        const periodData = await this._hass.callWS({
+          type: "recorder/statistics_during_period",
+          start_time: start.toISOString(),
+          end_time:   end.toISOString(),
+          statistic_ids: [...consumptionIds, ...costIds],
+          period: statPeriod,
+          units: { energy: "kWh" },
+          types: ["change"],
+        });
+        this._energy.stats[period]       = { data: periodData, statPeriod };
+        this._energy.loadedAt[period]    = now;
+      }
+      this.render();
+    } catch(e) { console.warn("[GlassDash] Energy stats failed:", e); }
+    finally    { this._energy.loading = false; }
   }
 
   // ── Camera (stable refresh, no flicker) ──────────────────────────────────────
@@ -464,8 +571,6 @@ class GlassDashboardCard extends HTMLElement {
     const curPos  = Math.min(posSec+elapsed, durSec||1);
     const spProg  = durSec>0 ? Math.min((curPos/durSec)*100,100) : 0;
     const volPct  = Math.round(Number(this.attr(e.spotifySpeaker,"volume_level",0)||0)*100);
-    const tvState = this.niceState(e.tv,"Off");
-    const spkNice = this.niceState(e.spotifySpeaker,"Idle");
 
     const camSrc = this._lastCamUrl || (this._hass?.states?.[e.petFeederCamera]?.attributes?.entity_picture || "");
 
@@ -520,17 +625,7 @@ class GlassDashboardCard extends HTMLElement {
         </section>
         ${this.climateSummary("Living Room · Climate",e.livingTemp,e.livingHumidity,e.livingAir)}
         ${this.climateSummary("Bedroom · Climate",e.bedTemp,e.bedHumidity,e.bedAir)}
-        ${this.p1Section()}
-        <section class="gl media-strip">
-          <div class="media-item">
-            <ha-icon icon="mdi:television"></ha-icon>
-            <div><b>Living Room TV</b><span>${tvState}</span></div>
-          </div>
-          <div class="media-item">
-            <ha-icon icon="mdi:speaker"></ha-icon>
-            <div><b>Dining Room</b><span>${spkNice}</span></div>
-          </div>
-        </section>
+        ${this.energySection()}
       </div>
 
       <!-- RIGHT: Tesla + Spotify -->
@@ -624,11 +719,22 @@ class GlassDashboardCard extends HTMLElement {
     this.shadowRoot.querySelector("[data-action='fullscreen']")?.addEventListener("click", () => this.toggleFullscreen());
 
     this.shadowRoot.querySelector("[data-action='forecast-retry']")?.addEventListener("click", () => {
-      this._forecastLoadedAt = 0; // reset cache to force immediate reload
+      this._forecastLoadedAt = 0;
       this._forecast = [];
       this.loadForecast();
-      this.render(); // show "Loading…" while we wait
+      this.render();
     });
+
+    // Energy period tabs
+    this.shadowRoot.querySelectorAll("[data-energy-period]").forEach(btn =>
+      btn.addEventListener("click", () => {
+        const p = btn.dataset.energyPeriod;
+        if (p === this._energy.period) return;
+        this._energy.period = p;
+        this.render();            // show new tab selection immediately
+        this.loadEnergy();        // fetch data for new period (may be cached)
+      })
+    );
   }
 
   // ── Component Builders ────────────────────────────────────────────────────────
@@ -684,66 +790,113 @@ class GlassDashboardCard extends HTMLElement {
     </section>`;
   }
 
-  p1Section() {
+  energySection() {
     const e = this.entities;
+    // Live W from real-time P1 sensor
     const rawPower  = this.st(e.p1Power, "--");
     const rawReturn = this.st(e.p1Return, "0");
-    const rawGas    = this.st(e.p1Gas, "--");
-    const rawToday  = this.st(e.p1EnergyToday, "--");
-
-    const powerW  = Number(rawPower);
-    const returnW = Number(rawReturn);
-    const isNum   = Number.isFinite(powerW);
-
-    // Watt → kW display when ≥1000 W
-    const powerDisp  = isNum
-      ? (powerW >= 1000 ? (powerW/1000).toFixed(2)+" kW" : Math.round(powerW)+" W")
-      : rawPower;
-    const returnDisp = Number.isFinite(returnW) && returnW > 0
-      ? (returnW >= 1000 ? (returnW/1000).toFixed(2)+" kW" : Math.round(returnW)+" W")
-      : null;
-
-    const gasNum   = Number(rawGas);
-    const gasDisp  = Number.isFinite(gasNum) ? gasNum.toFixed(1) : rawGas;
-    const todayNum = Number(rawToday);
-    const todayDisp= Number.isFinite(todayNum) ? todayNum.toFixed(2) : rawToday;
-
-    // Colour: green when returning solar, amber when consuming moderately, red when high
-    const powerColor = returnDisp
-      ? "#34d399"
-      : isNum && powerW < 500 ? "#34d399"
-      : isNum && powerW < 1500 ? "#fbbf24"
+    const powerW    = Number(rawPower);
+    const returnW   = Number(rawReturn);
+    const isLive    = Number.isFinite(powerW);
+    const returning = Number.isFinite(returnW) && returnW > 0;
+    const powerColor = returning      ? "#34d399"
+      : isLive && powerW < 500  ? "#34d399"
+      : isLive && powerW < 2000 ? "#fbbf24"
       : "#f87171";
+    const liveLabel = returning ? "Solar return" : "Live grid";
+    const liveVal   = isLive
+      ? (powerW >= 1000 ? (powerW/1000).toFixed(2)+" kW" : Math.round(powerW)+" W")
+      : "--";
 
-    const noData = !isNum && rawGas === "--" && rawToday === "--";
-    return `<section class="gl block p1-section">
+    // Today kWh + cost from HA Energy stats
+    const consumptionIds = this._energy.consumptionIds || [];
+    const costIds        = this._energy.costIds        || [];
+    const dayStats       = this._energy.stats["day"];
+    let todayKwh = 0, todayCostStat = 0, hasCostStat = false;
+    if (dayStats?.data) {
+      for (const id of consumptionIds) {
+        (dayStats.data[id] || []).forEach(b => { todayKwh += (b.change ?? 0); });
+      }
+      for (const id of costIds) {
+        const arr = dayStats.data[id] || [];
+        arr.forEach(b => { todayCostStat += (b.change ?? 0); });
+        if (arr.length) hasCostStat = true;
+      }
+    }
+    const todayCost = hasCostStat
+      ? todayCostStat.toFixed(2)
+      : (todayKwh * this._energyRate).toFixed(2);
+
+    // Chart buckets for selected period
+    const period      = this._energy.period;
+    const periodStats = this._energy.stats[period];
+    const buckets     = this._buildEnergyBuckets(periodStats, consumptionIds);
+
+    const noConfig    = !this._energy.prefs && !this._energy.loading;
+    const tabs = ["day","week","month","year"].map(p =>
+      `<button class="en-tab ${p===period?"active":""}" data-energy-period="${p}">${p.charAt(0).toUpperCase()+p.slice(1)}</button>`
+    ).join("");
+
+    return `<section class="gl block en-section">
       <div class="slbl">Energy</div>
-      ${noData ? `<div class="p1-nodata"><ha-icon icon="mdi:lightning-bolt-outline" style="--mdc-icon-size:16px;opacity:.3"></ha-icon><span>Set entity IDs in the card config<br><small>p1Power · p1Return · p1Gas · p1EnergyToday</small></span></div>` : ""}
-      <div class="p1-main" style="${noData?"display:none":""}">
-        <div class="p1-power-col">
-          <div class="p1-label">${returnDisp ? "Solar Return" : "Live Usage"}</div>
-          <div class="p1-value" style="color:${powerColor}">${returnDisp || powerDisp}</div>
-          ${returnDisp ? `<div class="p1-import">consuming ${powerDisp}</div>` : ""}
-          <div class="p1-spark">${this.sparkline(returnDisp ? e.p1Return : e.p1Power, powerColor)}</div>
+      ${noConfig ? `<div class="en-nodata"><ha-icon icon="mdi:lightning-bolt-outline" style="--mdc-icon-size:13px;opacity:.35"></ha-icon><span>Configure HA Energy dashboard to enable stats</span></div>` : ""}
+      <div class="en-live-row">
+        <div class="en-live-block">
+          <div class="en-live-val" style="color:${powerColor}">${liveVal}</div>
+          <div class="en-live-lbl">${liveLabel}</div>
         </div>
-        <div class="p1-stats">
-          <div class="p1-stat">
-            <ha-icon icon="mdi:flash" style="--mdc-icon-size:13px;color:#fbbf24;opacity:.8"></ha-icon>
-            <div>
-              <div class="p1-stat-val">${todayDisp}<span class="p1-unit"> kWh</span></div>
-              <div class="p1-stat-lbl">Today</div>
-            </div>
-          </div>
-          <div class="p1-stat">
-            <ha-icon icon="mdi:fire" style="--mdc-icon-size:13px;color:#f97316;opacity:.8"></ha-icon>
-            <div>
-              <div class="p1-stat-val">${gasDisp}<span class="p1-unit"> m³</span></div>
-              <div class="p1-stat-lbl">Gas</div>
-            </div>
-          </div>
-        </div>
+        ${dayStats || consumptionIds.length ? `<div class="en-divider"></div>
+        <div class="en-today-block">
+          <div class="en-today-val">${todayKwh > 0 ? todayKwh.toFixed(2) : "--"}<span class="en-unit"> kWh</span></div>
+          <div class="en-today-cost">${todayKwh > 0 ? "€"+todayCost+" today" : this._energy.loading ? "Loading…" : "No data yet"}</div>
+        </div>` : ""}
       </div>
+      ${!noConfig ? `<div class="en-tabs">${tabs}</div>
+      <div class="en-chart">${buckets.length ? this._energyBars(buckets) : `<div class="en-loading">${this._energy.loading ? "Loading…" : "No data"}</div>`}</div>` : ""}
     </section>`;
+  }
+
+  _buildEnergyBuckets(periodStats, consumptionIds) {
+    if (!periodStats?.data || !consumptionIds?.length) return [];
+    const map = {};
+    for (const id of consumptionIds) {
+      (periodStats.data[id] || []).forEach(entry => {
+        const key = entry.start;
+        if (!map[key]) map[key] = { start: entry.start, kwh: 0 };
+        map[key].kwh += (entry.change ?? 0);
+      });
+    }
+    return Object.values(map).sort((a,b) => a.start < b.start ? -1 : 1);
+  }
+
+  _bucketLabel(dt, period) {
+    const d = new Date(dt);
+    const h = d.getHours();
+    if (period === "day")   return h % 4 === 0 ? d.toLocaleTimeString([], { hour: "numeric", hour12: false }) : "";
+    if (period === "week")  return d.toLocaleDateString([], { weekday: "short" });
+    if (period === "month") { const day = d.getDate(); return (day === 1 || day % 5 === 0) ? String(day) : ""; }
+    return d.toLocaleDateString([], { month: "short" });
+  }
+
+  _energyBars(buckets) {
+    if (!buckets.length) return "";
+    const maxV = Math.max(...buckets.map(b => b.kwh), 0.001);
+    const W = 280, H = 60, labelH = 10, chartH = H - labelH;
+    const n = buckets.length;
+    const step = W / n;
+    const barW = Math.max(1.5, step * 0.72);
+    const nowIso = new Date().toISOString().slice(0, 13);
+    const bars = buckets.map((b, i) => {
+      const bh  = Math.max(1.5, (b.kwh / maxV) * chartH);
+      const x   = i * step + (step - barW) / 2;
+      const y   = chartH - bh;
+      const cur = b.start.slice(0, 13) === nowIso || i === buckets.length - 1;
+      const fill = cur ? "rgba(251,191,36,.95)" : "rgba(167,139,250,.52)";
+      const lbl  = this._bucketLabel(b.start, this._energy.period);
+      return `<rect x="${x.toFixed(1)}" y="${y.toFixed(1)}" width="${barW.toFixed(1)}" height="${bh.toFixed(1)}" rx="2" fill="${fill}"/>` +
+        (lbl ? `<text x="${(x+barW/2).toFixed(1)}" y="${H-1}" font-size="6" fill="rgba(255,255,255,.3)" text-anchor="middle" font-family="system-ui,sans-serif">${lbl}</text>` : "");
+    }).join("");
+    return `<svg class="en-svg" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none">${bars}</svg>`;
   }
 
   teslaCard(pct, range, place, climOn, targetTemp) {
@@ -801,6 +954,13 @@ class GlassDashboardCard extends HTMLElement {
   }
 
   spotifySection(pic, title, artist, album, active, playing, curPos, durSec, progress, vol) {
+    const e      = this.entities;
+    const tvSt   = this.st(e.tv, "off");
+    const tvOn   = ["on","playing"].includes(tvSt);
+    const tvLbl  = this.niceState(e.tv, "Off");
+    const spkSt  = this.st(e.spotifySpeaker, "idle");
+    const spkOn  = ["playing","paused","on"].includes(spkSt);
+    const spkLbl = this.niceState(e.spotifySpeaker, "Idle");
     return `<section class="gl sp2">
       ${pic ? `<img class="sp-art" src="${pic}" alt="album">` : `<div class="sp-art sp-art-empty"><ha-icon icon="mdi:spotify"></ha-icon></div>`}
       <div class="sp-body">
@@ -821,38 +981,70 @@ class GlassDashboardCard extends HTMLElement {
             <button class="sp-btn sp-sm" data-sp="vol-up"><ha-icon icon="mdi:volume-plus"></ha-icon></button>
           </div>
         </div>
+        <div class="sp-devices">
+          <div class="sp-device ${tvOn?"on":""}">
+            <div class="sp-dev-dot"></div>
+            <ha-icon icon="mdi:television" style="--mdc-icon-size:11px"></ha-icon>
+            <span>TV · ${tvLbl}</span>
+          </div>
+          <div class="sp-device ${spkOn?"on":""}">
+            <div class="sp-dev-dot"></div>
+            <ha-icon icon="mdi:speaker" style="--mdc-icon-size:11px"></ha-icon>
+            <span>Dining · ${spkLbl}</span>
+          </div>
+        </div>
       </div>
     </section>`;
   }
 
   weatherSection(state, temp, humidity, wind, feels, uv, vis) {
+    // Per-condition accent colours for icon and glass tint
+    const condAccent = {
+      sunny:         { bg:"rgba(251,191,36,.16)",  border:"rgba(251,191,36,.26)",  ico:"#fbbf24" },
+      "clear-night": { bg:"rgba(99,102,241,.16)",  border:"rgba(99,102,241,.26)",  ico:"#818cf8" },
+      clear:         { bg:"rgba(99,102,241,.14)",  border:"rgba(99,102,241,.22)",  ico:"#818cf8" },
+      partlycloudy:  { bg:"rgba(148,163,184,.11)", border:"rgba(148,163,184,.18)", ico:"rgba(255,255,255,.62)" },
+      cloudy:        { bg:"rgba(100,116,139,.14)", border:"rgba(100,116,139,.2)",  ico:"rgba(255,255,255,.5)" },
+      rainy:         { bg:"rgba(59,130,246,.16)",  border:"rgba(59,130,246,.26)",  ico:"#60a5fa" },
+      pouring:       { bg:"rgba(37,99,235,.2)",    border:"rgba(37,99,235,.32)",   ico:"#3b82f6" },
+      snowy:         { bg:"rgba(186,230,253,.14)", border:"rgba(186,230,253,.22)", ico:"#bae6fd" },
+      fog:           { bg:"rgba(148,163,184,.12)", border:"rgba(148,163,184,.18)", ico:"rgba(255,255,255,.45)" },
+      windy:         { bg:"rgba(167,139,250,.14)", border:"rgba(167,139,250,.24)", ico:"#a78bfa" },
+      hail:          { bg:"rgba(100,116,139,.14)", border:"rgba(100,116,139,.2)",  ico:"rgba(255,255,255,.55)" },
+    };
+    const acc = condAccent[state] || condAccent.partlycloudy;
+
     const days = (this._forecast||[]).slice(0,5);
     const forecastHTML = days.length
       ? days.map(d => {
-          const dt = new Date(d.datetime);
-          const lbl = dt.toLocaleDateString([],{weekday:"short"});
-          const hi = Math.round(d.temperature);
-          const lo = d.templow!=null ? Math.round(d.templow) : Math.round(d.temperature-4);
+          const dt     = new Date(d.datetime);
+          const lbl    = dt.toLocaleDateString([],{weekday:"short"});
+          const hi     = Math.round(d.temperature);
+          const lo     = d.templow!=null ? Math.round(d.templow) : Math.round(d.temperature-4);
+          const cond   = d.condition || state;
+          const precip = d.precipitation_probability != null ? Math.round(d.precipitation_probability) : null;
+          const ca     = condAccent[cond] || condAccent.partlycloudy;
           return `<div class="glsm wx-day">
             <div class="wxdn">${lbl}</div>
-            <ha-icon class="wxdi" icon="${this.weatherIcon(d.condition||state)}"></ha-icon>
+            <ha-icon class="wxdi" icon="${this.weatherIcon(cond)}" style="color:${ca.ico}"></ha-icon>
             <div class="wxdh">${hi}°</div>
             <div class="wxdl">${lo}°</div>
+            ${precip!=null ? `<div class="wx-precip">${precip}%</div>` : ""}
           </div>`;
         }).join("")
       : `<div class="wx-nof"><span>${this._forecastLoading ? "Loading forecast…" : "Forecast unavailable"}</span>${!this._forecastLoading ? `<button class="wx-retry" data-action="forecast-retry"><ha-icon icon="mdi:refresh"></ha-icon> Retry</button>` : ""}</div>`;
 
     const extras = [
-      feels!=null ? {icon:"mdi:thermometer-lines",val:`${Math.round(feels)}°`,lbl:"Feels like"} : null,
-      uv!=null    ? {icon:"mdi:white-balance-sunny",val:String(uv),lbl:"UV index"} : null,
-      vis!=null   ? {icon:"mdi:eye-outline",val:`${Math.round(vis)} km`,lbl:"Visibility"} : null,
+      feels!=null ? {icon:"mdi:thermometer-lines",  val:`${Math.round(feels)}°`, lbl:"Feels like"} : null,
+      uv!=null    ? {icon:"mdi:white-balance-sunny", val:String(uv),              lbl:"UV index"}   : null,
+      vis!=null   ? {icon:"mdi:eye-outline",         val:`${Math.round(vis)} km`, lbl:"Visibility"} : null,
     ].filter(Boolean);
 
-    return `<section class="gl wx-big">
-      <div class="slbl">Weather · Outside</div>
+    return `<section class="gl wx-big" style="background:${acc.bg};border-color:${acc.border}">
+      <div class="slbl" style="color:rgba(255,255,255,.42)">Weather · Outside</div>
       <div class="wx-hero">
         <div class="wx-hero-left">
-          <ha-icon class="wx-ico-big" icon="${this.weatherIcon(state)}"></ha-icon>
+          <ha-icon class="wx-ico-big" icon="${this.weatherIcon(state)}" style="color:${acc.ico}"></ha-icon>
           <div>
             <div class="wx-tmp-big">${temp}<span>°C</span></div>
             <div class="wx-cond-big">${state.replace(/-/g," ")}</div>
@@ -1145,29 +1337,30 @@ button.is-pressed{transform:scale(.93)!important;filter:brightness(1.2)}
 .tb.on span{color:rgba(200,185,255,.82)}
 
 /* Weather */
-.wx-big{padding:11px 13px}
+.wx-big{padding:11px 13px;transition:background .4s,border-color .4s}
 .wx-hero{display:flex;align-items:center;gap:16px;margin-bottom:10px}
 .wx-hero-left{display:flex;align-items:center;gap:11px;flex-shrink:0}
-.wx-ico-big{--mdc-icon-size:42px;color:rgba(255,255,255,.75)}
-.wx-tmp-big{font-size:34px;font-weight:200;color:rgba(255,255,255,.96);letter-spacing:-1.5px;line-height:1}
-.wx-tmp-big span{font-size:15px;color:rgba(255,255,255,.48)}
-.wx-cond-big{font-size:10px;color:rgba(255,255,255,.5);margin-top:3px;text-transform:capitalize;letter-spacing:.3px}
+.wx-ico-big{--mdc-icon-size:52px;transition:color .4s}
+.wx-tmp-big{font-size:46px;font-weight:100;color:rgba(255,255,255,.96);letter-spacing:-2.5px;line-height:1}
+.wx-tmp-big span{font-size:18px;color:rgba(255,255,255,.45);font-weight:300}
+.wx-cond-big{font-size:10px;color:rgba(255,255,255,.48);margin-top:4px;text-transform:capitalize;letter-spacing:.4px}
 .wx-details{display:flex;gap:6px;flex-wrap:wrap;flex:1}
-.wx-det{display:flex;flex-direction:column;align-items:center;gap:3px;min-width:55px;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.08);border-radius:10px;padding:7px 9px;flex:1}
+.wx-det{display:flex;flex-direction:column;align-items:center;gap:3px;min-width:55px;background:rgba(255,255,255,.07);border:1px solid rgba(255,255,255,.1);border-radius:10px;padding:7px 9px;flex:1}
 .wx-det ha-icon{--mdc-icon-size:15px;color:rgba(255,255,255,.5)}
-.wx-det-val{font-size:13px;font-weight:600;color:rgba(255,255,255,.86)}
-.wx-det-lbl{font-size:8px;color:rgba(255,255,255,.4);text-transform:uppercase;letter-spacing:.4px;text-align:center}
-.wx-sep{height:1px;background:rgba(255,255,255,.08);margin:9px 0}
+.wx-det-val{font-size:13px;font-weight:600;color:rgba(255,255,255,.88)}
+.wx-det-lbl{font-size:8px;color:rgba(255,255,255,.38);text-transform:uppercase;letter-spacing:.4px;text-align:center}
+.wx-sep{height:1px;background:rgba(255,255,255,.1);margin:9px 0}
 .wx-forecast{display:grid;grid-template-columns:repeat(5,1fr);gap:6px}
 .wx-nof{display:flex;align-items:center;justify-content:center;gap:10px;color:rgba(255,255,255,.28);font-size:10px;padding:10px;text-align:center}
 .wx-retry{display:flex;align-items:center;gap:4px;background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.14)!important;border-radius:8px;padding:4px 9px;font-size:9px;font-weight:700;color:rgba(255,255,255,.55);cursor:pointer;transition:all .15s}
 .wx-retry:hover{background:rgba(255,255,255,.13)}
 .wx-retry ha-icon{--mdc-icon-size:11px}
 .wx-day{text-align:center;padding:8px 4px}
-.wxdn{font-size:8px;color:rgba(255,255,255,.46);text-transform:uppercase;letter-spacing:.5px;margin-bottom:5px}
-.wxdi{--mdc-icon-size:18px;color:rgba(255,255,255,.62);margin-bottom:4px;display:block}
-.wxdh{font-size:13px;font-weight:600;color:rgba(255,255,255,.82)}
+.wxdn{font-size:8px;color:rgba(255,255,255,.44);text-transform:uppercase;letter-spacing:.5px;margin-bottom:5px}
+.wxdi{--mdc-icon-size:20px;margin-bottom:5px;display:block;transition:color .3s}
+.wxdh{font-size:13px;font-weight:600;color:rgba(255,255,255,.84)}
 .wxdl{font-size:10px;color:rgba(255,255,255,.4);margin-top:2px}
+.wx-precip{font-size:8px;color:rgba(96,165,250,.75);margin-top:3px;font-weight:600}
 
 /* Spotify */
 .sp2{padding:10px 11px;display:flex;gap:11px;align-items:flex-start}
@@ -1193,12 +1386,15 @@ button.is-pressed{transform:scale(.93)!important;filter:brightness(1.2)}
 .sp-vol-group{display:flex;align-items:center;gap:3px;margin-left:auto}
 .sp-vol-lbl{font-size:9px;color:rgba(255,255,255,.42);min-width:26px;text-align:center}
 
-/* Media strip */
-.media-strip{padding:8px 11px;display:grid;grid-template-columns:1fr 1fr;gap:7px}
-.media-item{display:flex;align-items:center;gap:7px;min-width:0}
-.media-item ha-icon{--mdc-icon-size:17px;color:rgba(255,255,255,.68)}
-.media-item b{display:block;font-size:10px;color:rgba(255,255,255,.86);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.media-item span{display:block;font-size:8px;color:rgba(255,255,255,.52);margin-top:1px}
+/* Spotify device strip */
+.sp-devices{display:flex;gap:8px;margin-top:7px;padding-top:7px;border-top:1px solid rgba(255,255,255,.07)}
+.sp-device{display:flex;align-items:center;gap:4px;flex:1;font-size:9px;color:rgba(255,255,255,.35);overflow:hidden}
+.sp-device ha-icon{flex-shrink:0;color:rgba(255,255,255,.35);transition:color .2s}
+.sp-device.on ha-icon{color:rgba(200,185,255,.8)}
+.sp-device span{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;transition:color .2s}
+.sp-device.on span{color:rgba(200,185,255,.8)}
+.sp-dev-dot{width:4px;height:4px;border-radius:50%;background:rgba(255,255,255,.15);flex-shrink:0;transition:background .2s}
+.sp-device.on .sp-dev-dot{background:#a78bfa;box-shadow:0 0 6px rgba(167,139,250,.6)}
 
 /* Room pages */
 .rp-hero{padding:12px}
@@ -1235,22 +1431,25 @@ button.is-pressed{transform:scale(.93)!important;filter:brightness(1.2)}
 .li-slider::-webkit-slider-thumb{-webkit-appearance:none;width:15px;height:15px;border-radius:50%;background:rgba(200,185,255,.92);cursor:pointer;box-shadow:0 1px 5px rgba(0,0,0,.35)}
 .li-slider::-moz-range-thumb{width:15px;height:15px;border-radius:50%;background:rgba(200,185,255,.92);cursor:pointer;border:0}
 
-/* P1 Energy meter */
-.p1-section{padding:10px}
-.p1-nodata{display:flex;align-items:center;gap:8px;color:rgba(255,255,255,.28);font-size:9px;line-height:1.5;padding:4px 0 6px}
-.p1-nodata small{font-size:8px;opacity:.7;font-family:monospace}
-.p1-main{display:flex;gap:10px;align-items:flex-start}
-.p1-power-col{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px}
-.p1-label{font-size:8px;font-weight:700;color:rgba(255,255,255,.35);text-transform:uppercase;letter-spacing:.7px;margin-bottom:2px}
-.p1-value{font-size:26px;font-weight:300;letter-spacing:-1px;line-height:1.05}
-.p1-import{font-size:8px;color:rgba(255,255,255,.35);margin-top:1px}
-.p1-spark{width:100%;height:28px;margin-top:5px;overflow:hidden}
-.p1-stats{display:flex;flex-direction:column;gap:6px;flex-shrink:0;min-width:84px}
-.p1-stat{display:flex;align-items:center;gap:7px;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.08);border-radius:9px;padding:7px 9px}
-.p1-stat ha-icon{flex-shrink:0}
-.p1-stat-val{font-size:13px;font-weight:600;color:rgba(255,255,255,.88);line-height:1}
-.p1-unit{font-size:9px;color:rgba(255,255,255,.4);font-weight:400}
-.p1-stat-lbl{font-size:8px;color:rgba(255,255,255,.38);text-transform:uppercase;letter-spacing:.4px;margin-top:2px}
+/* Energy section */
+.en-section{padding:10px}
+.en-nodata{display:flex;align-items:center;gap:7px;color:rgba(255,255,255,.28);font-size:9px;padding:2px 0 8px;line-height:1.5}
+.en-live-row{display:flex;align-items:center;gap:12px;margin-bottom:10px}
+.en-live-block{flex-shrink:0}
+.en-live-val{font-size:26px;font-weight:300;letter-spacing:-1px;line-height:1.05;transition:color .3s}
+.en-live-lbl{font-size:8px;color:rgba(255,255,255,.36);text-transform:uppercase;letter-spacing:.6px;margin-top:2px}
+.en-divider{width:1px;height:40px;background:rgba(255,255,255,.1);flex-shrink:0}
+.en-today-block{flex:1;min-width:0}
+.en-today-val{font-size:20px;font-weight:300;color:rgba(255,255,255,.92);letter-spacing:-.6px;line-height:1}
+.en-unit{font-size:10px;color:rgba(255,255,255,.4);font-weight:400}
+.en-today-cost{font-size:9px;color:rgba(255,255,255,.42);margin-top:4px}
+.en-tabs{display:flex;gap:4px;margin-bottom:8px}
+.en-tab{flex:1;padding:4px 2px;border-radius:8px;font-size:9px;font-weight:700;color:rgba(255,255,255,.4);background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.07)!important;transition:all .15s;text-transform:capitalize;text-align:center;cursor:pointer}
+.en-tab:hover{background:rgba(255,255,255,.09);color:rgba(255,255,255,.65)}
+.en-tab.active{background:rgba(167,139,250,.18);border-color:rgba(167,139,250,.35)!important;color:rgba(200,185,255,.92)}
+.en-chart{width:100%;height:60px;overflow:hidden}
+.en-svg{width:100%;height:60px;display:block}
+.en-loading{height:60px;display:flex;align-items:center;justify-content:center;font-size:9px;color:rgba(255,255,255,.22)}
 
 /* Climate detail */
 .cd-full{grid-column:span 2;padding:7px 10px;display:flex;align-items:center;justify-content:space-between;color:rgba(255,255,255,.38);font-size:10px;border-radius:10px;background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.07)}
