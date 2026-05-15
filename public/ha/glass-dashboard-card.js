@@ -192,7 +192,7 @@ class GlassDashboardCard extends HTMLElement {
 
   async loadHistory() {
     if (this._historyLoading) return;
-    if (this._historyLoadedAt && Date.now() - this._historyLoadedAt < 300000) return;
+    if (this._historyLoadedAt && Date.now() - this._historyLoadedAt < 360000) return;
     if (!this._hass) return;
     this._historyLoading = true;
     const sensors = [
@@ -201,9 +201,10 @@ class GlassDashboardCard extends HTMLElement {
       this.entities.p1Power,    this.entities.p1Return,
     ];
     try {
-      // Primary: REST API via fetchWithAuth (most reliable, no format surprises)
-      const start = new Date(Date.now() - 4 * 3600 * 1000).toISOString();
-      const url = `/api/history/period/${encodeURIComponent(start)}?filter_entity_id=${sensors.join(",")}&minimal_response=true&no_attributes=true`;
+      // Primary: REST API — full response (no minimal_response) so stable sensors
+      // that barely change still get their history entries recorded properly.
+      const start = new Date(Date.now() - 6 * 3600 * 1000).toISOString();
+      const url = `/api/history/period/${encodeURIComponent(start)}?filter_entity_id=${sensors.join(",")}&no_attributes=true`;
       const resp = await this._hass.fetchWithAuth(url);
       if (resp.ok) {
         const data = await resp.json(); // array of arrays, in same order as filter_entity_id
@@ -224,7 +225,7 @@ class GlassDashboardCard extends HTMLElement {
 
     // Fallback: WebSocket API
     try {
-      const start = new Date(Date.now() - 4 * 3600 * 1000).toISOString();
+      const start = new Date(Date.now() - 6 * 3600 * 1000).toISOString();
       const data = await this._hass.callWS({
         type: "history/history_during_period",
         entity_ids: sensors,
@@ -310,28 +311,54 @@ class GlassDashboardCard extends HTMLElement {
 
   sparkline(entity, color = "rgba(255,170,50,.85)") {
     const raw = this._history?.[entity];
-    if (!raw || raw.length < 3) return `<div class="spark-empty"></div>`;
+    if (!raw || raw.length < 1) return `<div class="spark-empty"></div>`;
+
+    // Parse all valid numeric state entries (handles full and minimal_response format)
     const pts = raw.map(s => ({
       v: Number(s.state ?? s.s),
-      t: s.last_changed ? new Date(s.last_changed).getTime() : (s.lu ? s.lu * 1000 : 0),
+      t: s.last_changed
+        ? new Date(s.last_changed).getTime()
+        : (s.lu ? s.lu * 1000 : 0),
     })).filter(p => Number.isFinite(p.v) && p.t > 0);
-    if (pts.length < 3) return `<div class="spark-empty"></div>`;
-    // Downsample to ≤60 points for smooth rendering
-    const step = Math.max(1, Math.floor(pts.length / 60));
-    const dp = pts.filter((_,i) => i % step === 0 || i === pts.length-1);
-    const W = 200, H = 32;
-    const minV = Math.min(...dp.map(p=>p.v)), maxV = Math.max(...dp.map(p=>p.v));
-    const pad = Math.max((maxV - minV) * 0.15, 0.2);
-    const lo = minV - pad, hi = maxV + pad, rng = hi - lo;
-    const minT = dp[0].t, maxT = dp[dp.length-1].t;
+
+    if (pts.length < 1) return `<div class="spark-empty"></div>`;
+
+    // Time-bucket averaging: divide 6h window into 60 buckets (6-min each).
+    // Average all values within each bucket → eliminates noise, fills gaps.
+    const minT = pts[0].t, maxT = pts[pts.length - 1].t;
     const tRng = maxT - minT || 1;
+    const BUCKETS = 60;
+    const bucketMs = tRng / BUCKETS;
+    const dp = [];
+    for (let i = 0; i < BUCKETS; i++) {
+      const t0 = minT + i * bucketMs;
+      const t1 = t0 + bucketMs;
+      const inB = pts.filter(p => p.t >= t0 && p.t < t1);
+      if (inB.length > 0) {
+        const avg = inB.reduce((s, p) => s + p.v, 0) / inB.length;
+        dp.push({ v: avg, t: t0 + bucketMs / 2 });
+      }
+    }
+    // If stable sensor with 0–1 changes: make a flat line across the window
+    if (dp.length < 2) {
+      const v = pts[Math.floor(pts.length / 2)].v;
+      dp.push({ v, t: minT }, { v, t: maxT });
+    }
+
+    const W = 200, H = 32;
+    const minV = Math.min(...dp.map(p => p.v));
+    const maxV = Math.max(...dp.map(p => p.v));
+    const pad = Math.max((maxV - minV) * 0.2, 0.3);
+    const lo = minV - pad, hi = maxV + pad, rng = hi - lo;
+    const dMinT = dp[0].t, dMaxT = dp[dp.length - 1].t, dTRng = dMaxT - dMinT || 1;
+
     const coords = dp.map(p => [
-      (p.t - minT) / tRng * W,
+      (p.t - dMinT) / dTRng * W,
       H - 2 - (p.v - lo) / rng * (H - 6),
     ]);
 
-    // Catmull-Rom → cubic Bézier for smooth curves
-    const tension = 0.35;
+    // Catmull-Rom → cubic Bézier (smooth, never spiky)
+    const tension = 0.3;
     let linePath = `M${coords[0][0].toFixed(1)},${coords[0][1].toFixed(1)}`;
     for (let i = 0; i < coords.length - 1; i++) {
       const p0 = coords[Math.max(0, i - 1)];
@@ -344,10 +371,8 @@ class GlassDashboardCard extends HTMLElement {
       const cp2y = p2[1] - (p3[1] - p1[1]) * tension;
       linePath += ` C${cp1x.toFixed(1)},${cp1y.toFixed(1)} ${cp2x.toFixed(1)},${cp2y.toFixed(1)} ${p2[0].toFixed(1)},${p2[1].toFixed(1)}`;
     }
-    const last = coords[coords.length - 1];
     const areaPath = `${linePath} L${W},${H} L0,${H} Z`;
-
-    const gid = `sg${entity.replace(/[^a-z0-9]/gi,"")}`;
+    const gid = `sg${entity.replace(/[^a-z0-9]/gi, "")}`;
     return `<svg class="spark" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none">
       <defs><linearGradient id="${gid}" x1="0" y1="0" x2="0" y2="1">
         <stop offset="0%" stop-color="${color}" stop-opacity="0.35"/>
@@ -690,9 +715,11 @@ class GlassDashboardCard extends HTMLElement {
       : isNum && powerW < 1500 ? "#fbbf24"
       : "#f87171";
 
+    const noData = !isNum && rawGas === "--" && rawToday === "--";
     return `<section class="gl block p1-section">
-      <div class="slbl">Energy · P1 Meter</div>
-      <div class="p1-main">
+      <div class="slbl">Energy</div>
+      ${noData ? `<div class="p1-nodata"><ha-icon icon="mdi:lightning-bolt-outline" style="--mdc-icon-size:16px;opacity:.3"></ha-icon><span>Set entity IDs in the card config<br><small>p1Power · p1Return · p1Gas · p1EnergyToday</small></span></div>` : ""}
+      <div class="p1-main" style="${noData?"display:none":""}">
         <div class="p1-power-col">
           <div class="p1-label">${returnDisp ? "Solar Return" : "Live Usage"}</div>
           <div class="p1-value" style="color:${powerColor}">${returnDisp || powerDisp}</div>
@@ -723,16 +750,18 @@ class GlassDashboardCard extends HTMLElement {
     const battColor = pct > 50 ? "#34d399" : pct > 20 ? "#fbbf24" : "#f87171";
     const climLabel = climOn ? `On · ${targetTemp}°C` : `Off · ${targetTemp}°C`;
     return `<section class="gl tc">
-      <div class="tc-top">
-        <div>
-          <div class="tc-name">Model 3</div>
-          <div class="tc-sub">Tesla</div>
+      <div class="tc-hero">
+        <div class="tc-top">
+          <div>
+            <div class="tc-name">Model 3</div>
+            <div class="tc-sub">Tesla</div>
+          </div>
+          <div class="tag">${place}</div>
         </div>
-        <div class="tag">${place}</div>
-      </div>
-      <div class="tc-img-wrap">
-        <div class="tc-glow"></div>
-        <img class="tc-car" src="https://teslakortingscode.com/ha/tesla-model-3.png" alt="Model 3" draggable="false">
+        <div class="tc-img-wrap">
+          <div class="tc-glow"></div>
+          <img class="tc-car" src="https://teslakortingscode.com/ha/tesla-model-3.png" alt="Model 3" draggable="false">
+        </div>
       </div>
       <div class="tc-stats">
         <div class="tc-batt-row">
@@ -1081,15 +1110,13 @@ button.is-pressed{transform:scale(.93)!important;filter:brightness(1.2)}
 
 /* Tesla card — Tesla-app style */
 .tc{overflow:hidden;padding:0}
-/* Header + car image share the same deep-space background */
-.tc-top{display:flex;justify-content:space-between;align-items:center;padding:13px 14px 0;
-  background:radial-gradient(ellipse 140% 200% at 50% -20%,rgba(28,22,58,.98),rgba(6,6,20,.99) 70%)}
+/* Single wrapper gives header + car image one unified dark background */
+.tc-hero{background:linear-gradient(180deg,rgba(16,10,38,.98) 0%,rgba(5,5,18,.99) 100%)}
+.tc-top{display:flex;justify-content:space-between;align-items:center;padding:13px 14px 4px;background:transparent}
 .tc-brand{display:flex;align-items:center;gap:8px}
 .tc-name{font-size:17px;font-weight:700;color:rgba(255,255,255,.92);letter-spacing:-.3px}
 .tc-sub{font-size:9px;color:rgba(255,255,255,.38);letter-spacing:.8px;text-transform:uppercase;margin-top:1px}
-.tc-img-wrap{width:100%;height:165px;position:relative;
-  background:radial-gradient(ellipse 140% 200% at 50% -40%,rgba(28,22,58,.98),rgba(6,6,20,.99) 70%);
-  display:flex;align-items:center;justify-content:center;overflow:hidden}
+.tc-img-wrap{width:100%;height:165px;position:relative;background:transparent;display:flex;align-items:center;justify-content:center;overflow:hidden}
 .tc-glow{position:absolute;bottom:0;left:0;right:0;height:50px;background:radial-gradient(ellipse 90% 100% at 50% 100%,rgba(60,90,220,.2),transparent 70%);pointer-events:none}
 .tc-car{width:96%;height:100%;object-fit:contain;object-position:center 60%;filter:drop-shadow(0 14px 22px rgba(0,0,0,.65));pointer-events:none;user-select:none;position:relative;z-index:1}
 .tc-stats{padding:9px 13px 6px}
@@ -1210,6 +1237,8 @@ button.is-pressed{transform:scale(.93)!important;filter:brightness(1.2)}
 
 /* P1 Energy meter */
 .p1-section{padding:10px}
+.p1-nodata{display:flex;align-items:center;gap:8px;color:rgba(255,255,255,.28);font-size:9px;line-height:1.5;padding:4px 0 6px}
+.p1-nodata small{font-size:8px;opacity:.7;font-family:monospace}
 .p1-main{display:flex;gap:10px;align-items:flex-start}
 .p1-power-col{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px}
 .p1-label{font-size:8px;font-weight:700;color:rgba(255,255,255,.35);text-transform:uppercase;letter-spacing:.7px;margin-bottom:2px}
