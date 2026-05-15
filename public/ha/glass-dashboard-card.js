@@ -4,7 +4,16 @@ class GlassDashboardCard extends HTMLElement {
     this.attachShadow({ mode: "open" });
     this._tab = "ov";
     this._timer = null;
+    this._camTimer = null;
     this._config = {};
+    this._history = {};
+    this._forecast = [];
+    this._forecastLoading = false;
+    this._forecastLoadedAt = 0;
+    this._historyLoading = false;
+    this._historyLoadedAt = 0;
+    this._lastCamUrl = "";
+    this._camFetching = false;
     this.entities = {
       mainLights: [
         "light.lounge_light","light.living_room","light.reading_light",
@@ -13,7 +22,10 @@ class GlassDashboardCard extends HTMLElement {
         "light.rgbic_tv_backlight","light.tv_left","light.tv_right","light.marylin",
       ],
       bedroomLights: ["light.bed","switch.night_light","light.kast","light.closet"],
-      gameLights: ["light.plafond","light.desk_lamp","light.desk_led_strip","light.battletron_smart_desk_light_strip","light.battletron_smart_desk_light_strip_2"],
+      gameLights: [
+        "light.plafond","light.desk_lamp","light.desk_led_strip",
+        "light.battletron_smart_desk_light_strip","light.battletron_smart_desk_light_strip_2",
+      ],
       utilityLights: ["light.toilet","light.hallway_door"],
       livingTemp:     "sensor.living_room_sensor_temperature",
       livingHumidity: "sensor.living_room_sensor_humidity",
@@ -30,208 +42,321 @@ class GlassDashboardCard extends HTMLElement {
       teslaSentry:    "switch.model_3_sentry_mode",
       teslaCharge:    "switch.model_3_charge",
       teslaLock:      "lock.model_3_lock",
-      teslaStatus:    "binary_sensor.model_3_status",
       teslaChargePort:"cover.model_3_charge_port_door",
       teslaFrunk:     "cover.model_3_froot",
       teslaBoot:      "cover.model_3_boot",
-      // Spotify entity = track info / Speaker entity = playback control
       spotify:        "media_player.spotify_tristan_pahud_de_mortanges",
       spotifySpeaker: "media_player.dining_room",
       tv:             "media_player.lg_webos_tv_oled65c54la_2",
       toonDevices:    ["light.pet_feeder_indicator_light","switch.pet_feeder_motion_alarm","switch.pet_feeder_motion_recording","switch.pet_feeder_time_watermark"],
       toonSensors:    ["sensor.poopas_poops_cat_weight","sensor.poopas_poops_excretion_duration","sensor.poopas_poops_excretion_times_day"],
-      petFeederCamera:"camera.pet_feeder",  // VERIFY: check Settings → Entities → search "camera"
+      petFeederCamera:"camera.pet_feeder",
     };
   }
 
   setConfig(config) { this._config = config || {}; }
 
+  connectedCallback() {
+    if (!this._camTimer) {
+      this._camTimer = window.setInterval(() => this.updateCamera(), 5000);
+    }
+  }
+
+  disconnectedCallback() {
+    if (this._timer)    { window.clearInterval(this._timer);    this._timer    = null; }
+    if (this._camTimer) { window.clearInterval(this._camTimer); this._camTimer = null; }
+  }
+
   set hass(hass) {
     this._hass = hass;
     this.loadForecast();
+    this.loadHistory();
     this.render();
     if (!this._timer) this._timer = window.setInterval(() => this.updateClock(), 10000);
   }
 
-  disconnectedCallback() {
-    if (this._timer) window.clearInterval(this._timer);
-    this._timer = null;
-  }
+  getCardSize() { return 14; }
 
-  getCardSize() { return 12; }
-
+  // ── Helpers ─────────────────────────────────────────────────────────────────
   st(entity, fallback = "Unknown") {
     const s = this._hass?.states?.[entity]?.state;
     if (!s || s === "unavailable" || s === "unknown") return fallback;
     return s;
   }
-
   attr(entity, key, fallback = undefined) {
     return this._hass?.states?.[entity]?.attributes?.[key] ?? fallback;
   }
-
-  fmt(entity, suffix = "", fallback = "Unknown", digits = 0) {
+  fmt(entity, suffix = "", fallback = "--", digits = 0) {
     const raw = this.st(entity, fallback);
     const n = Number(raw);
     if (!Number.isFinite(n)) return raw;
     return `${n.toFixed(digits)}${suffix}`;
   }
-
   niceState(entity, fallback = "Unknown") {
     const s = this.st(entity, fallback);
     if (s === fallback) return fallback;
-    return s.replaceAll("_", " ").replace(/\b\w/g, c => c.toUpperCase());
+    return s.replaceAll("_"," ").replace(/\b\w/g, c => c.toUpperCase());
   }
-
   isOn(entity) {
-    return ["on","heat","cool","playing","home"].includes(this._hass?.states?.[entity]?.state);
+    return ["on","heat","cool","playing","home","open"].includes(
+      this._hass?.states?.[entity]?.state
+    );
   }
-
-  anyOn(entities) { return entities.some(e => this.isOn(e)); }
+  anyOn(entities)   { return entities.some(e => this.isOn(e)); }
   countOn(entities) { return entities.filter(e => this.isOn(e)).length; }
-
   service(domain, svc, data) { return this._hass?.callService(domain, svc, data); }
-  toggleEntity(entity) { const d = entity.split(".")[0]; this.service(d, "toggle", { entity_id: entity }); }
-  toggleGroup(entities) { this.service("homeassistant", "toggle", { entity_id: entities }); }
-
+  toggleEntity(entity) { this.service(entity.split(".")[0], "toggle", { entity_id: entity }); }
+  toggleGroup(entities) { this.service("homeassistant","toggle",{ entity_id: entities }); }
   turnOffAll() {
-    this.service("homeassistant", "turn_off", {
-      entity_id: [...this.entities.mainLights,...this.entities.bedroomLights,...this.entities.gameLights,...this.entities.utilityLights],
-    });
+    this.service("homeassistant","turn_off",{ entity_id:[
+      ...this.entities.mainLights,...this.entities.bedroomLights,
+      ...this.entities.gameLights,...this.entities.utilityLights,
+    ]});
   }
-
   toggleClimate() {
     const cur = this._hass?.states?.[this.entities.teslaClimate]?.state;
     this.service("climate", cur === "off" ? "turn_on" : "turn_off", { entity_id: this.entities.teslaClimate });
   }
-
-  // Pick the best entity to send media commands to (speaker if active, else Spotify entity)
+  setClimateTemp(delta) {
+    const cur = Number(this.attr(this.entities.teslaClimate,"temperature",22));
+    this.service("climate","set_temperature",{
+      entity_id: this.entities.teslaClimate,
+      temperature: Math.round((cur + delta) * 2) / 2,
+    });
+  }
   mediaControlTarget() {
-    const spkState = this.st(this.entities.spotifySpeaker, "idle");
-    if (["playing","paused","on"].includes(spkState)) return this.entities.spotifySpeaker;
-    return this.entities.spotify;
+    const s = this.st(this.entities.spotifySpeaker,"idle");
+    return ["playing","paused","on"].includes(s) ? this.entities.spotifySpeaker : this.entities.spotify;
   }
 
+  // ── Data Loading ─────────────────────────────────────────────────────────────
   async loadForecast() {
-    if (this._forecastLoading || (this._forecastLoaded && this._forecast?.length) || !this._hass?.callWS) return;
+    if (this._forecastLoading) return;
+    if (this._forecast?.length && Date.now() - this._forecastLoadedAt < 1800000) return;
     this._forecastLoading = true;
     try {
-      const data = await this._hass.callWS({ type: "weather/get_forecasts", entity_id: this.entities.weather, forecast_type: "daily" });
-      this._forecast = data?.[this.entities.weather]?.forecast || [];
-      this._forecastLoaded = true;
-      this.render();
-    } catch { this._forecastLoaded = false; }
-    finally { this._forecastLoading = false; }
+      if (this._hass?.callWS) {
+        const data = await this._hass.callWS({
+          type: "weather/get_forecasts",
+          entity_id: this.entities.weather,
+          forecast_type: "daily",
+        });
+        this._forecast = data?.[this.entities.weather]?.forecast || [];
+      }
+      if (!this._forecast?.length) {
+        this._forecast = this.attr(this.entities.weather,"forecast",[]) || [];
+      }
+      this._forecastLoadedAt = Date.now();
+      if (this._forecast.length) this.render();
+    } catch {
+      this._forecast = this.attr(this.entities.weather,"forecast",[]) || [];
+      this._forecastLoadedAt = Date.now();
+      if (this._forecast.length) this.render();
+    } finally {
+      this._forecastLoading = false;
+    }
   }
 
+  async loadHistory() {
+    if (this._historyLoading) return;
+    if (this._historyLoadedAt && Date.now() - this._historyLoadedAt < 300000) return;
+    if (!this._hass?.callWS) return;
+    this._historyLoading = true;
+    const sensors = [
+      this.entities.livingTemp, this.entities.livingHumidity, this.entities.livingAir,
+      this.entities.bedTemp,    this.entities.bedHumidity,    this.entities.bedAir,
+    ];
+    try {
+      const start = new Date(Date.now() - 3 * 3600 * 1000).toISOString();
+      const data = await this._hass.callWS({
+        type: "history/history_during_period",
+        entity_ids: sensors,
+        start_time: start,
+        significant_changes_only: false,
+        minimal_response: true,
+        no_attributes: true,
+      });
+      if (data) {
+        this._history = data;
+        this._historyLoadedAt = Date.now();
+        this.render();
+      }
+    } catch { /* sparklines silently skipped */ }
+    finally { this._historyLoading = false; }
+  }
+
+  // ── Camera (stable refresh, no flicker) ──────────────────────────────────────
+  updateCamera() {
+    if (!this._hass) return;
+    const camState = this._hass?.states?.[this.entities.petFeederCamera];
+    const ep = camState?.attributes?.entity_picture;
+    if (!ep) return;
+    const url = ep + (ep.includes("?") ? "&" : "?") + "t=" + Date.now();
+    this._lastCamUrl = url;
+    const img = this.shadowRoot?.querySelector(".cam-feed");
+    if (img) {
+      img.onerror = () => {
+        img.style.display = "none";
+        const err = img.nextElementSibling;
+        if (err) err.style.display = "flex";
+      };
+      img.onload = () => {
+        img.style.display = "block";
+        const err = img.nextElementSibling;
+        if (err) err.style.display = "none";
+      };
+      img.src = url;
+    }
+  }
+
+  // ── Utilities ─────────────────────────────────────────────────────────────────
   weatherIcon(state) {
-    const m = { rainy:"mdi:weather-rainy", pouring:"mdi:weather-pouring", cloudy:"mdi:weather-cloudy",
-      partlycloudy:"mdi:weather-partly-cloudy", sunny:"mdi:weather-sunny", clear:"mdi:weather-night",
-      "clear-night":"mdi:weather-night", fog:"mdi:weather-fog", snowy:"mdi:weather-snowy",
-      windy:"mdi:weather-windy", hail:"mdi:weather-hail" };
+    const m = {
+      rainy:"mdi:weather-rainy", pouring:"mdi:weather-pouring",
+      cloudy:"mdi:weather-cloudy", partlycloudy:"mdi:weather-partly-cloudy",
+      sunny:"mdi:weather-sunny", clear:"mdi:weather-night",
+      "clear-night":"mdi:weather-night", fog:"mdi:weather-fog",
+      snowy:"mdi:weather-snowy", windy:"mdi:weather-windy", hail:"mdi:weather-hail",
+    };
     return m[state] || "mdi:weather-partly-cloudy";
   }
-
   fmtTime(secs) {
     if (!secs || secs < 0) return "0:00";
-    const s = Math.round(secs), m = Math.floor(s / 60);
-    return `${m}:${String(s % 60).padStart(2, "0")}`;
+    const s = Math.round(secs), m = Math.floor(s/60);
+    return `${m}:${String(s%60).padStart(2,"0")}`;
   }
-
-  aqColor(val) {
+  aqLabel(val) {
+    const n = Number(val);
+    if (Number.isFinite(n)) {
+      if (n <= 12)  return "Good";
+      if (n <= 35)  return "Moderate";
+      if (n <= 55)  return "Sensitive";
+      if (n <= 150) return "Unhealthy";
+      return "Hazardous";
+    }
     const v = String(val).toLowerCase();
-    if (v.includes("good") || v.includes("excellent")) return "#34d399";
-    if (v.includes("fair") || v.includes("moderate")) return "#fbbf24";
-    if (v.includes("poor") || v.includes("unhealthy")) return "#f87171";
-    if (v.includes("very") || v.includes("hazard")) return "#c084fc";
+    if (v.includes("good") || v.includes("excellent")) return "Good";
+    if (v.includes("fair") || v.includes("moderate"))  return "Moderate";
+    if (v.includes("poor") || v.includes("unhealthy")) return "Unhealthy";
+    return String(val);
+  }
+  aqColor(val) {
+    const l = this.aqLabel(val).toLowerCase();
+    if (l.includes("good"))      return "#34d399";
+    if (l.includes("moderate"))  return "#fbbf24";
+    if (l.includes("sensitive")) return "#fb923c";
+    if (l.includes("unhealthy")) return "#f87171";
+    if (l.includes("hazardous")) return "#c084fc";
     return "#34d399";
   }
 
-  // Web Audio click sound
+  sparkline(entity, color = "rgba(255,170,50,.85)") {
+    const raw = this._history?.[entity];
+    if (!raw || raw.length < 3) return `<div class="spark-empty"></div>`;
+    const pts = raw.map(s => ({
+      v: Number(s.state ?? s.s),
+      t: s.last_changed ? new Date(s.last_changed).getTime() : (s.lu ? s.lu * 1000 : 0),
+    })).filter(p => Number.isFinite(p.v) && p.t > 0);
+    if (pts.length < 3) return `<div class="spark-empty"></div>`;
+    const step = Math.max(1, Math.floor(pts.length / 50));
+    const dp = pts.filter((_,i) => i % step === 0 || i === pts.length-1);
+    const W = 200, H = 32;
+    const minV = Math.min(...dp.map(p=>p.v)), maxV = Math.max(...dp.map(p=>p.v));
+    const rng = maxV - minV || 1;
+    const minT = dp[0].t, maxT = dp[dp.length-1].t;
+    const tRng = maxT - minT || 1;
+    const coords = dp.map(p => [
+      ((p.t - minT) / tRng * W).toFixed(1),
+      (H - 2 - (p.v - minV) / rng * (H - 8)).toFixed(1),
+    ]);
+    const line = coords.map(c=>c.join(",")).join(" ");
+    const area = `M${coords[0].join(",")} ${coords.slice(1).map(c=>`L${c.join(",")}`).join(" ")} L${W},${H} L0,${H} Z`;
+    const gid = `sg${entity.replace(/[^a-z0-9]/gi,"")}`;
+    return `<svg class="spark" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none">
+      <defs><linearGradient id="${gid}" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0%" stop-color="${color}" stop-opacity="0.4"/>
+        <stop offset="100%" stop-color="${color}" stop-opacity="0"/>
+      </linearGradient></defs>
+      <path d="${area}" fill="url(#${gid})"/>
+      <polyline points="${line}" fill="none" stroke="${color}" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+    </svg>`;
+  }
+
   playClick() {
     try {
       const ctx = new (window.AudioContext || window.webkitAudioContext)();
       const t = ctx.currentTime;
-      [
-        { freq: [1100, 450], gain: [0.07, 0.001], dur: 0.07 },
-        { freq: [2200, 900], gain: [0.035, 0.001], dur: 0.045 },
-      ].forEach(({ freq, gain, dur }) => {
-        const o = ctx.createOscillator(), g = ctx.createGain();
-        o.connect(g); g.connect(ctx.destination);
-        o.type = "sine";
-        o.frequency.setValueAtTime(freq[0], t);
-        o.frequency.exponentialRampToValueAtTime(freq[1], t + dur);
-        g.gain.setValueAtTime(gain[0], t);
-        g.gain.exponentialRampToValueAtTime(gain[1], t + dur);
-        o.start(t); o.stop(t + dur);
-      });
+      [{freq:[1100,450],gain:[0.07,0.001],dur:0.07},{freq:[2200,900],gain:[0.035,0.001],dur:0.045}]
+        .forEach(({freq,gain,dur}) => {
+          const o = ctx.createOscillator(), g = ctx.createGain();
+          o.connect(g); g.connect(ctx.destination);
+          o.type = "sine";
+          o.frequency.setValueAtTime(freq[0],t);
+          o.frequency.exponentialRampToValueAtTime(freq[1],t+dur);
+          g.gain.setValueAtTime(gain[0],t);
+          g.gain.exponentialRampToValueAtTime(gain[1],t+dur);
+          o.start(t); o.stop(t+dur);
+        });
       setTimeout(() => ctx.close(), 400);
     } catch {}
   }
 
   updateClock() {
-    const time = this.shadowRoot.getElementById("clk-t");
-    const date = this.shadowRoot.getElementById("clk-d");
-    if (!time || !date) return;
+    const ti = this.shadowRoot.getElementById("clk-t");
+    const da = this.shadowRoot.getElementById("clk-d");
+    if (!ti||!da) return;
     const now = new Date();
-    time.textContent = now.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-    date.textContent = now.toLocaleDateString([], { weekday: "short", day: "numeric", month: "long" });
+    ti.textContent = now.toLocaleTimeString([],{hour:"2-digit",minute:"2-digit"});
+    da.textContent = now.toLocaleDateString([],{weekday:"short",day:"numeric",month:"long"});
   }
-
   greeting() {
     const h = new Date().getHours();
     return h < 12 ? "Good morning" : h < 18 ? "Good afternoon" : "Good evening";
   }
 
+  // ── Main Render ───────────────────────────────────────────────────────────────
   render() {
     if (!this._hass) return;
     const e = this.entities;
+
     const livingOn  = this.anyOn(e.mainLights);
     const bedroomOn = this.anyOn(e.bedroomLights);
     const gameOn    = this.anyOn(e.gameLights);
     const utilityOn = this.anyOn(e.utilityLights);
 
-    const battery    = this.fmt(e.teslaBattery, "%", "Unknown");
-    const batteryRaw = Number(this.st(e.teslaBattery, "0"));
-    const range      = this.fmt(e.teslaRange, " km", "Unknown", 0);
-    const teslaPlace = this.st(e.teslaLocation, "Away");
-    const teslaStatus = this.niceState(e.teslaStatus, "Asleep");
-    const teslaDetails = [`Port ${this.niceState(e.teslaChargePort,"?")}`,`Boot ${this.niceState(e.teslaBoot,"?")}`,`Frunk ${this.niceState(e.teslaFrunk,"?")}`].join(" · ");
+    const batteryRaw  = Number(this.st(e.teslaBattery,"0")) || 0;
+    const range       = this.fmt(e.teslaRange," km","--",0);
+    const teslaPlace  = this.niceState(e.teslaLocation,"Away");
+    const climOn      = this.isOn(e.teslaClimate);
+    const targetTemp  = this.attr(e.teslaClimate,"temperature",22);
 
-    // Weather
-    const weatherState    = this.st(e.weather, "clear-night");
-    const weatherTemp     = this.attr(e.weather, "temperature", "--");
-    const weatherHumidity = this.attr(e.weather, "humidity", "--");
-    const weatherWind     = this.attr(e.weather, "wind_speed", "--");
-    const weatherFeels    = this.attr(e.weather, "apparent_temperature", null);
-    const weatherUV       = this.attr(e.weather, "uv_index", null);
-    const weatherVis      = this.attr(e.weather, "visibility", null);
-    const weatherDew      = this.attr(e.weather, "dew_point", null);
+    const weatherState    = this.st(e.weather,"clear-night");
+    const weatherTemp     = this.attr(e.weather,"temperature","--");
+    const weatherHumidity = this.attr(e.weather,"humidity","--");
+    const weatherWind     = this.attr(e.weather,"wind_speed","--");
+    const weatherFeels    = this.attr(e.weather,"apparent_temperature",null);
+    const weatherUV       = this.attr(e.weather,"uv_index",null);
+    const weatherVis      = this.attr(e.weather,"visibility",null);
 
-    // Spotify - read from Spotify entity, control via speaker
-    const spotifyTitle   = this.attr(e.spotify, "media_title", "");
-    const spotifyArtist  = this.attr(e.spotify, "media_artist", "");
-    const spotifyAlbum   = this.attr(e.spotify, "media_album_name", "");
-    const spotifyPic     = this.attr(e.spotify, "entity_picture", "") || this.attr(e.spotifySpeaker, "entity_picture", "");
-    const spotifyState   = this.st(e.spotify, "idle");
-    const spkState       = this.st(e.spotifySpeaker, "idle");
-    const spotifyPlaying = spotifyState === "playing" || spkState === "playing";
-    const spotifyActive  = ["playing","paused"].includes(spotifyState) || ["playing","paused"].includes(spkState);
-    const durSec         = Number(this.attr(e.spotify, "media_duration", 0)) || 0;
-    const posSec         = Number(this.attr(e.spotify, "media_position", 0)) || 0;
-    const posUpdatedAt   = this.attr(e.spotify, "media_position_updated_at", null);
-    const elapsed        = posUpdatedAt && spotifyPlaying ? (Date.now() - new Date(posUpdatedAt).getTime()) / 1000 : 0;
-    const currentPos     = Math.min(posSec + elapsed, durSec || 1);
-    const spProgress     = durSec > 0 ? Math.min((currentPos / durSec) * 100, 100) : 0;
-    const volumePct      = Math.round(Number(this.attr(e.spotifySpeaker, "volume_level", 0) || 0) * 100);
-    const tvState        = this.niceState(e.tv, "Off");
-    const speakerState   = this.niceState(e.spotifySpeaker, "Idle");
+    const spotifyTitle  = this.attr(e.spotify,"media_title","");
+    const spotifyArtist = this.attr(e.spotify,"media_artist","");
+    const spotifyAlbum  = this.attr(e.spotify,"media_album_name","");
+    const spotifyPic    = this.attr(e.spotify,"entity_picture","") || this.attr(e.spotifySpeaker,"entity_picture","");
+    const spotifyState  = this.st(e.spotify,"idle");
+    const spkState      = this.st(e.spotifySpeaker,"idle");
+    const spotifyPlaying= spotifyState==="playing"||spkState==="playing";
+    const spotifyActive = ["playing","paused"].includes(spotifyState)||["playing","paused"].includes(spkState);
+    const durSec  = Number(this.attr(e.spotify,"media_duration",0))||0;
+    const posSec  = Number(this.attr(e.spotify,"media_position",0))||0;
+    const posUpAt = this.attr(e.spotify,"media_position_updated_at",null);
+    const elapsed = posUpAt && spotifyPlaying ? (Date.now()-new Date(posUpAt).getTime())/1000 : 0;
+    const curPos  = Math.min(posSec+elapsed, durSec||1);
+    const spProg  = durSec>0 ? Math.min((curPos/durSec)*100,100) : 0;
+    const volPct  = Math.round(Number(this.attr(e.spotifySpeaker,"volume_level",0)||0)*100);
+    const tvState = this.niceState(e.tv,"Off");
+    const spkNice = this.niceState(e.spotifySpeaker,"Idle");
 
-    // Camera - use entity_picture with embedded token (works without extra auth)
-    const camState = this._hass?.states?.[e.petFeederCamera];
-    const camUrl   = camState?.attributes?.entity_picture
-      ? camState.attributes.entity_picture.startsWith("http") ? camState.attributes.entity_picture : `http://192.168.0.108:8123${camState.attributes.entity_picture}&t=${Date.now()}`
-      : `/api/camera_proxy/${e.petFeederCamera}?t=${Date.now()}`;
+    const camSrc = this._lastCamUrl || (this._hass?.states?.[e.petFeederCamera]?.attributes?.entity_picture || "");
 
     this.shadowRoot.innerHTML = `<style>${this.css()}</style><ha-card><div class="dash">
   <div class="bg"></div>
@@ -248,24 +373,24 @@ class GlassDashboardCard extends HTMLElement {
   </div>
 
   <div class="tabs z1">
-    ${this.tab("ov",   "mdi:view-dashboard-outline", "Overview")}
-    ${this.tab("liv",  "mdi:sofa-outline",            "Living Room")}
-    ${this.tab("bed",  "mdi:bed-king-outline",         "Master Bedroom")}
-    ${this.tab("game", "mdi:gamepad-variant-outline", "Game Room")}
-    ${this.tab("toon", "mdi:cat",                     "Toon's Room")}
-    ${this.tab("util", "mdi:home-floor-1",            "Utility")}
+    ${this.tab("ov",   "mdi:view-dashboard-outline","Overview")}
+    ${this.tab("liv",  "mdi:sofa-outline",          "Living Room")}
+    ${this.tab("bed",  "mdi:bed-king-outline",       "Bedroom")}
+    ${this.tab("game", "mdi:gamepad-variant-outline","Game Room")}
+    ${this.tab("toon", "mdi:cat",                   "Toon's Room")}
+    ${this.tab("util", "mdi:home-floor-1",          "Utility")}
   </div>
   <div class="divider z1"></div>
 
   <!-- OVERVIEW -->
-  <div class="page page-ov ${this._tab === "ov" ? "active" : ""} z1">
+  <div class="page page-ov ${this._tab==="ov"?"active":""} z1">
     <div class="ov-main">
       <div class="col">
         <section class="gl block">
           <div class="slbl">Lights</div>
           <div class="rooms5">
             ${this.room("Living Room","mdi:sofa-outline",           livingOn, "main")}
-            ${this.room("Master Bed", "mdi:bed-king-outline",        bedroomOn,"bedroom")}
+            ${this.room("Bedroom",    "mdi:bed-king-outline",        bedroomOn,"bedroom")}
             ${this.room("Game Room",  "mdi:gamepad-variant-outline", gameOn,   "game")}
             ${this.room("Utility",    "mdi:home-floor-1",           utilityOn,"utility")}
             <button class="gl room alloff" data-action="all-off">
@@ -275,67 +400,13 @@ class GlassDashboardCard extends HTMLElement {
             </button>
           </div>
         </section>
-        ${this.climateSummary("Living Room · Climate", e.livingTemp, e.livingHumidity, e.livingAir)}
-        ${this.climateSummary("Master Bedroom · Climate", e.bedTemp, e.bedHumidity, e.bedAir)}
+        ${this.climateSummary("Living Room · Climate",e.livingTemp,e.livingHumidity,e.livingAir)}
+        ${this.climateSummary("Bedroom · Climate",e.bedTemp,e.bedHumidity,e.bedAir)}
       </div>
 
       <div class="col">
-        <section class="gl tesla-card">
-          <div class="car-area">
-            <div class="car-glow"></div>
-            <img class="car-img" src="https://teslakortingscode.com/ha/tesla-model-3.png" alt="Tesla Model 3">
-          </div>
-          <div class="tesla-stats">
-            <div class="tesla-hdr">
-              <div>
-                <div class="tesla-name">Model 3</div>
-                <div class="tesla-sub">${teslaDetails}</div>
-              </div>
-              <div class="tag">${teslaPlace}</div>
-            </div>
-            <div class="batt-row">
-              <div class="bpct">${battery === "Unknown" ? "Wake car" : battery.replace("%","")}<span>${battery === "Unknown" ? "" : "%"}</span></div>
-              <div class="bkm">${range === "Unknown" ? teslaStatus : range}</div>
-            </div>
-            <div class="bbar"><div class="bfill" style="width:${Number.isFinite(batteryRaw) ? batteryRaw : 0}%"></div></div>
-            <div class="tbtns">
-              ${this.teslaButton("climate","mdi:fan",                   "Climate",this.isOn(e.teslaClimate))}
-              ${this.teslaButton("defrost", "mdi:car-defrost-front",     "Defrost", this.isOn(e.teslaDefrost))}
-              ${this.teslaButton("sentry",  "mdi:shield-check-outline",  "Sentry",  this.isOn(e.teslaSentry))}
-              ${this.teslaButton("charge",  "mdi:lightning-bolt-outline","Charge",  this.isOn(e.teslaCharge))}
-              ${this.teslaButton("wake",    "mdi:power-cycle",           "Wake",    false)}
-            </div>
-          </div>
-        </section>
-
-        <!-- Spotify -->
-        <section class="gl sp2">
-          ${spotifyPic
-            ? `<img class="sp-art" src="${spotifyPic}" alt="album">`
-            : `<div class="sp-art sp-art-empty"><ha-icon icon="mdi:spotify"></ha-icon></div>`}
-          <div class="sp-body">
-            <div class="sp-track">${spotifyTitle || (spotifyActive ? "Playing" : "Spotify")}</div>
-            <div class="sp-artist">${spotifyArtist || (spotifyActive ? "Unknown artist" : "Nothing playing")}</div>
-            ${spotifyAlbum ? `<div class="sp-album">${spotifyAlbum}</div>` : ""}
-            <div class="sp-prog-wrap">
-              <div class="sp-prog-bar"><div class="sp-prog-fill" style="width:${spProgress}%"></div></div>
-              <div class="sp-times"><span>${this.fmtTime(currentPos)}</span><span>${this.fmtTime(durSec)}</span></div>
-            </div>
-            <div class="sp-ctrl-row">
-              <button class="sp-btn" data-sp="prev"><ha-icon icon="mdi:skip-previous"></ha-icon></button>
-              <button class="sp-btn sp-play" data-sp="play-pause">
-                <ha-icon icon="mdi:${spotifyPlaying ? "pause" : "play"}"></ha-icon>
-              </button>
-              <button class="sp-btn" data-sp="next"><ha-icon icon="mdi:skip-next"></ha-icon></button>
-              <div class="sp-vol-group">
-                <button class="sp-btn sp-sm" data-sp="vol-down"><ha-icon icon="mdi:volume-minus"></ha-icon></button>
-                <span class="sp-vol-lbl">${volumePct}%</span>
-                <button class="sp-btn sp-sm" data-sp="vol-up"><ha-icon icon="mdi:volume-plus"></ha-icon></button>
-              </div>
-            </div>
-          </div>
-        </section>
-
+        ${this.teslaCard(batteryRaw,range,teslaPlace,climOn,targetTemp)}
+        ${this.spotifySection(spotifyPic,spotifyTitle,spotifyArtist,spotifyAlbum,spotifyActive,spotifyPlaying,curPos,durSec,spProg,volPct)}
         <section class="gl media-strip">
           <div class="media-item">
             <ha-icon icon="mdi:television"></ha-icon>
@@ -343,34 +414,37 @@ class GlassDashboardCard extends HTMLElement {
           </div>
           <div class="media-item">
             <ha-icon icon="mdi:speaker"></ha-icon>
-            <div><b>Dining Room</b><span>${speakerState}</span></div>
+            <div><b>Dining Room</b><span>${spkNice}</span></div>
           </div>
         </section>
       </div>
     </div>
-
-    <!-- Weather full-width -->
-    ${this.weatherSection(weatherState, weatherTemp, weatherHumidity, weatherWind, weatherFeels, weatherUV, weatherVis)}
+    ${this.weatherSection(weatherState,weatherTemp,weatherHumidity,weatherWind,weatherFeels,weatherUV,weatherVis)}
   </div>
 
-  ${this.roomPage("liv",  "Living Room",    "Kitchen · Dining · TV area", e.mainLights,    e.livingTemp, e.livingHumidity, e.livingAir)}
-  ${this.roomPage("bed",  "Master Bedroom", "Sleep environment",           e.bedroomLights, e.bedTemp,    e.bedHumidity,    e.bedAir)}
-  ${this.roomPage("game", "Game Room",      "Office · Gaming",             e.gameLights)}
-  ${this.toonPage(camUrl)}
-  ${this.roomPage("util", "Utility",        "Toilet · Hallway/Door",       e.utilityLights)}
+  ${this.roomPage("liv","Living Room","Kitchen · Dining · TV area",e.mainLights,e.livingTemp,e.livingHumidity,e.livingAir)}
+  ${this.roomPage("bed","Bedroom","Sleep environment",e.bedroomLights,e.bedTemp,e.bedHumidity,e.bedAir)}
+  ${this.roomPage("game","Game Room","Office · Gaming",e.gameLights)}
+  ${this.toonPage(camSrc)}
+  ${this.roomPage("util","Utility","Toilet · Hallway/Door",e.utilityLights)}
 </div></ha-card>`;
 
     this.updateClock();
     this.bindEvents();
+    if (this._tab === "toon") setTimeout(() => this.updateCamera(), 80);
   }
 
+  // ── Events ────────────────────────────────────────────────────────────────────
   bindEvents() {
-    // Click sound + press animation on all buttons
     this.shadowRoot.querySelectorAll("button").forEach(btn => {
       btn.addEventListener("pointerdown", () => {
         this.playClick();
         btn.classList.add("is-pressed");
-        setTimeout(() => btn.classList.remove("is-pressed"), 180);
+        btn.closest(".light-item")?.classList.add("item-pressed");
+        setTimeout(() => {
+          btn.classList.remove("is-pressed");
+          btn.closest(".light-item")?.classList.remove("item-pressed");
+        }, 180);
       });
     });
 
@@ -379,7 +453,7 @@ class GlassDashboardCard extends HTMLElement {
 
     this.shadowRoot.querySelectorAll("[data-room]").forEach(btn => {
       const map = { main:this.entities.mainLights, bedroom:this.entities.bedroomLights, game:this.entities.gameLights, utility:this.entities.utilityLights };
-      btn.addEventListener("click", () => this.toggleGroup(map[btn.dataset.room] || []));
+      btn.addEventListener("click", () => this.toggleGroup(map[btn.dataset.room]||[]));
     });
 
     this.shadowRoot.querySelectorAll("[data-entity]").forEach(btn =>
@@ -387,48 +461,56 @@ class GlassDashboardCard extends HTMLElement {
 
     this.shadowRoot.querySelector("[data-action='all-off']")?.addEventListener("click", () => this.turnOffAll());
 
+    // Brightness sliders — debounced, stop propagation so toggle doesn't fire
+    const slideTimers = {};
+    this.shadowRoot.querySelectorAll("[data-brightness-entity]").forEach(slider => {
+      slider.addEventListener("pointerdown", e => e.stopPropagation());
+      slider.addEventListener("click",       e => e.stopPropagation());
+      slider.addEventListener("input", () => {
+        const entity = slider.dataset.brightnessEntity;
+        clearTimeout(slideTimers[entity]);
+        slideTimers[entity] = setTimeout(() => {
+          const brightness = Math.round(Number(slider.value) / 100 * 255);
+          this.service("light","turn_on",{ entity_id: entity, brightness });
+        }, 200);
+      });
+    });
+
     // Tesla
-    this.shadowRoot.querySelector("[data-tesla='climate']")?.addEventListener("click", () => this.toggleClimate());
-    this.shadowRoot.querySelector("[data-tesla='defrost']")?.addEventListener("click",  () => this.toggleEntity(this.entities.teslaDefrost));
-    this.shadowRoot.querySelector("[data-tesla='sentry']")?.addEventListener("click",   () => this.toggleEntity(this.entities.teslaSentry));
-    this.shadowRoot.querySelector("[data-tesla='charge']")?.addEventListener("click",   () => this.toggleEntity(this.entities.teslaCharge));
-    this.shadowRoot.querySelector("[data-tesla='wake']")?.addEventListener("click",     () => this.service("button", "press", { entity_id: "button.model_3_wake" }));
+    this.shadowRoot.querySelector("[data-tesla='climate']")  ?.addEventListener("click", () => this.toggleClimate());
+    this.shadowRoot.querySelector("[data-tesla='defrost']")  ?.addEventListener("click", () => this.toggleEntity(this.entities.teslaDefrost));
+    this.shadowRoot.querySelector("[data-tesla='sentry']")   ?.addEventListener("click", () => this.toggleEntity(this.entities.teslaSentry));
+    this.shadowRoot.querySelector("[data-tesla='charge']")   ?.addEventListener("click", () => this.toggleEntity(this.entities.teslaCharge));
+    this.shadowRoot.querySelector("[data-tesla='wake']")     ?.addEventListener("click", () => this.service("button","press",{ entity_id:"button.model_3_wake" }));
+    this.shadowRoot.querySelector("[data-tesla='temp-up']")  ?.addEventListener("click", () => this.setClimateTemp(0.5));
+    this.shadowRoot.querySelector("[data-tesla='temp-down']")?.addEventListener("click", () => this.setClimateTemp(-0.5));
 
-    // Spotify — always send to mediaControlTarget() so we hit the active entity
+    // Spotify
     const tgt = () => this.mediaControlTarget();
-    const sp = this.entities.spotify;
-    this.shadowRoot.querySelector("[data-sp='play-pause']")?.addEventListener("click", () => this.service("media_player","media_play_pause",{ entity_id: tgt() }));
-    this.shadowRoot.querySelector("[data-sp='prev']")?.addEventListener("click",       () => this.service("media_player","media_previous_track",{ entity_id: tgt() }));
-    this.shadowRoot.querySelector("[data-sp='next']")?.addEventListener("click",       () => this.service("media_player","media_next_track",{ entity_id: tgt() }));
-    this.shadowRoot.querySelector("[data-sp='vol-up']")?.addEventListener("click", () => {
-      const spk = this.entities.spotifySpeaker;
-      const cur = Number(this.attr(spk,"volume_level",0)) || 0;
-      this.service("media_player","volume_set",{ entity_id: spk, volume_level: Math.min(1, cur+0.05) });
+    this.shadowRoot.querySelector("[data-sp='play-pause']")?.addEventListener("click", () => this.service("media_player","media_play_pause",{ entity_id:tgt() }));
+    this.shadowRoot.querySelector("[data-sp='prev']")      ?.addEventListener("click", () => this.service("media_player","media_previous_track",{ entity_id:tgt() }));
+    this.shadowRoot.querySelector("[data-sp='next']")      ?.addEventListener("click", () => this.service("media_player","media_next_track",{ entity_id:tgt() }));
+    this.shadowRoot.querySelector("[data-sp='vol-up']")    ?.addEventListener("click", () => {
+      const cur = Number(this.attr(this.entities.spotifySpeaker,"volume_level",0))||0;
+      this.service("media_player","volume_set",{ entity_id:this.entities.spotifySpeaker, volume_level:Math.min(1,cur+0.05) });
     });
-    this.shadowRoot.querySelector("[data-sp='vol-down']")?.addEventListener("click", () => {
-      const spk = this.entities.spotifySpeaker;
-      const cur = Number(this.attr(spk,"volume_level",0)) || 0;
-      this.service("media_player","volume_set",{ entity_id: spk, volume_level: Math.max(0, cur-0.05) });
+    this.shadowRoot.querySelector("[data-sp='vol-down']")  ?.addEventListener("click", () => {
+      const cur = Number(this.attr(this.entities.spotifySpeaker,"volume_level",0))||0;
+      this.service("media_player","volume_set",{ entity_id:this.entities.spotifySpeaker, volume_level:Math.max(0,cur-0.05) });
     });
 
-    // Camera refresh
-    this.shadowRoot.querySelector("[data-action='cam-refresh']")?.addEventListener("click", () => {
-      const img = this.shadowRoot.querySelector(".cam-feed");
-      if (img) {
-        const base = img.src.replace(/[?&]t=\d+/, "");
-        img.src = base + (base.includes("?") ? "&" : "?") + "t=" + Date.now();
-      }
-    });
+    this.shadowRoot.querySelector("[data-action='cam-refresh']")?.addEventListener("click", () => this.updateCamera());
   }
 
+  // ── Component Builders ────────────────────────────────────────────────────────
   tab(id, icon, label) {
-    return `<button class="tab ${this._tab === id ? "active" : ""}" data-tab="${id}">
+    return `<button class="tab ${this._tab===id?"active":""}" data-tab="${id}">
       <ha-icon icon="${icon}"></ha-icon>${label}
     </button>`;
   }
 
   room(label, icon, on, group) {
-    return `<button class="gl room ${on ? "on" : ""}" data-room="${group}">
+    return `<button class="gl room ${on?"on":""}" data-room="${group}">
       <div class="rdot"></div>
       <ha-icon class="ri" icon="${icon}"></ha-icon>
       <div class="rn">${label}</div>
@@ -436,51 +518,132 @@ class GlassDashboardCard extends HTMLElement {
   }
 
   climateSummary(title, temp, humidity, air) {
-    const aqv = this.st(air, "Good");
-    const aqc = this.aqColor(aqv);
+    const rawAq  = this.st(air,"0");
+    const aqLbl  = this.aqLabel(rawAq);
+    const aqc    = this.aqColor(rawAq);
+    const aqNum  = Number.isFinite(Number(rawAq)) ? Number(rawAq).toFixed(0) : rawAq;
     return `<section class="gl block">
       <div class="slbl">${title}</div>
-      <div class="clim-split">
-        <div class="clim-left">
-          <div class="glsm ci-sm">
-            <div class="cv-sm">${this.fmt(temp,"","--",1)}<span class="cu-sm">°</span></div>
-            <div class="cl-sm">Temp</div>
+      <div class="clim-row">
+        <div class="clim-col">
+          <div class="cv">${this.fmt(temp,"","--",1)}<span class="cu">°</span></div>
+          <div class="cl">Temperature</div>
+          <div class="spark-wrap">${this.sparkline(temp)}</div>
+        </div>
+        <div class="clim-sep"></div>
+        <div class="clim-col">
+          <div class="cv">${this.fmt(humidity,"","--",0)}<span class="cu">%</span></div>
+          <div class="cl">Humidity</div>
+          <div class="spark-wrap">${this.sparkline(humidity,"rgba(100,180,255,.8)")}</div>
+        </div>
+        <div class="clim-sep"></div>
+        <div class="clim-col aq-col">
+          <div class="aq-dot" style="background:${aqc};box-shadow:0 0 9px ${aqc}99"></div>
+          <div class="cv" style="color:${aqc};margin-top:3px">${aqNum}<span class="cu" style="color:${aqc}99">µg</span></div>
+          <div class="cl" style="color:${aqc}cc">${aqLbl}</div>
+        </div>
+      </div>
+    </section>`;
+  }
+
+  teslaCard(pct, range, place, climOn, targetTemp) {
+    const battColor = pct > 50 ? "#34d399" : pct > 20 ? "#fbbf24" : "#f87171";
+    const climLabel = climOn ? `On · ${targetTemp}°C` : `Off · ${targetTemp}°C`;
+    return `<section class="gl tc">
+      <div class="tc-top">
+        <div class="tc-brand">
+          <div class="tc-t">T</div>
+          <div class="tc-name">Model 3</div>
+        </div>
+        <div class="tag">${place}</div>
+      </div>
+      <div class="tc-img-wrap">
+        <div class="tc-glow"></div>
+        <img class="tc-car" src="https://teslakortingscode.com/ha/tesla-model-3.png" alt="Model 3" draggable="false">
+      </div>
+      <div class="tc-stats">
+        <div class="tc-batt-row">
+          <div class="tc-pct" style="color:${battColor}">${Math.round(pct)}<span>%</span></div>
+          <div class="tc-range">${range}</div>
+        </div>
+        <div class="tc-bar"><div class="tc-fill" style="width:${pct}%;background:${battColor}"></div></div>
+        <div class="tc-clim-row">
+          <div class="tc-clim-left">
+            <ha-icon icon="mdi:fan" style="--mdc-icon-size:18px;color:rgba(255,255,255,.55)"></ha-icon>
+            <div>
+              <div class="tc-clim-lbl">Climate</div>
+              <div class="tc-clim-val ${climOn?"climon":""}">${climLabel}</div>
+            </div>
           </div>
-          <div class="glsm ci-sm">
-            <div class="cv-sm">${this.fmt(humidity,"","--",0)}<span class="cu-sm">%</span></div>
-            <div class="cl-sm">Humidity</div>
+          <div class="tc-temp-ctrl">
+            <button class="tc-tbtn" data-tesla="temp-down">−</button>
+            <span class="tc-tval">${targetTemp}°</span>
+            <button class="tc-tbtn" data-tesla="temp-up">+</button>
           </div>
         </div>
-        <div class="glsm aq-badge">
-          <div class="aq-pulse" style="background:${aqc};box-shadow:0 0 10px ${aqc}55"></div>
-          <div class="aq-val" style="color:${aqc}">${aqv}</div>
-          <div class="aq-lbl">Air Quality</div>
+      </div>
+      <div class="tc-btns">
+        ${this.teslaButton("climate","mdi:fan",                   "AC",      climOn)}
+        ${this.teslaButton("defrost","mdi:car-defrost-front",     "Defrost", this.isOn(this.entities.teslaDefrost))}
+        ${this.teslaButton("sentry", "mdi:shield-check-outline",  "Sentry",  this.isOn(this.entities.teslaSentry))}
+        ${this.teslaButton("charge", "mdi:lightning-bolt-outline","Charge",  this.isOn(this.entities.teslaCharge))}
+        ${this.teslaButton("wake",   "mdi:power-cycle",           "Wake",    false)}
+      </div>
+    </section>`;
+  }
+
+  teslaButton(action, icon, label, on) {
+    return `<button class="tb ${on?"on":""}" data-tesla="${action}">
+      <ha-icon icon="${icon}"></ha-icon><span>${label}</span>
+    </button>`;
+  }
+
+  spotifySection(pic, title, artist, album, active, playing, curPos, durSec, progress, vol) {
+    return `<section class="gl sp2">
+      ${pic ? `<img class="sp-art" src="${pic}" alt="album">` : `<div class="sp-art sp-art-empty"><ha-icon icon="mdi:spotify"></ha-icon></div>`}
+      <div class="sp-body">
+        <div class="sp-track">${title||(active?"Playing":"Spotify")}</div>
+        <div class="sp-artist">${artist||(active?"Unknown artist":"Nothing playing")}</div>
+        ${album?`<div class="sp-album">${album}</div>`:""}
+        <div class="sp-prog-wrap">
+          <div class="sp-prog-bar"><div class="sp-prog-fill" style="width:${progress}%"></div></div>
+          <div class="sp-times"><span>${this.fmtTime(curPos)}</span><span>${this.fmtTime(durSec)}</span></div>
+        </div>
+        <div class="sp-ctrl-row">
+          <button class="sp-btn" data-sp="prev"><ha-icon icon="mdi:skip-previous"></ha-icon></button>
+          <button class="sp-btn sp-play" data-sp="play-pause"><ha-icon icon="mdi:${playing?"pause":"play"}"></ha-icon></button>
+          <button class="sp-btn" data-sp="next"><ha-icon icon="mdi:skip-next"></ha-icon></button>
+          <div class="sp-vol-group">
+            <button class="sp-btn sp-sm" data-sp="vol-down"><ha-icon icon="mdi:volume-minus"></ha-icon></button>
+            <span class="sp-vol-lbl">${vol}%</span>
+            <button class="sp-btn sp-sm" data-sp="vol-up"><ha-icon icon="mdi:volume-plus"></ha-icon></button>
+          </div>
         </div>
       </div>
     </section>`;
   }
 
   weatherSection(state, temp, humidity, wind, feels, uv, vis) {
-    const days = (this._forecast || []).slice(0, 5);
+    const days = (this._forecast||[]).slice(0,5);
     const forecastHTML = days.length
       ? days.map(d => {
-          const dt    = new Date(d.datetime);
-          const label = dt.toLocaleDateString([], { weekday: "short" });
-          const high  = Math.round(d.temperature);
-          const low   = Math.round(d.templow ?? d.temperature - 4);
+          const dt = new Date(d.datetime);
+          const lbl = dt.toLocaleDateString([],{weekday:"short"});
+          const hi = Math.round(d.temperature);
+          const lo = d.templow!=null ? Math.round(d.templow) : Math.round(d.temperature-4);
           return `<div class="glsm wx-day">
-            <div class="wxdn">${label}</div>
-            <ha-icon class="wxdi" icon="${this.weatherIcon(d.condition || state)}"></ha-icon>
-            <div class="wxdh">${high}°</div>
-            <div class="wxdl">${low}°</div>
+            <div class="wxdn">${lbl}</div>
+            <ha-icon class="wxdi" icon="${this.weatherIcon(d.condition||state)}"></ha-icon>
+            <div class="wxdh">${hi}°</div>
+            <div class="wxdl">${lo}°</div>
           </div>`;
         }).join("")
-      : `<div class="wx-nof">Forecast loading…</div>`;
+      : `<div class="wx-nof">Loading forecast…</div>`;
 
     const extras = [
-      feels !== null ? { icon:"mdi:thermometer-lines", val:`${Math.round(feels)}°`, lbl:"Feels like" } : null,
-      uv    !== null ? { icon:"mdi:white-balance-sunny", val:String(uv), lbl:"UV index" } : null,
-      vis   !== null ? { icon:"mdi:eye-outline", val:`${Math.round(vis)} km`, lbl:"Visibility" } : null,
+      feels!=null ? {icon:"mdi:thermometer-lines",val:`${Math.round(feels)}°`,lbl:"Feels like"} : null,
+      uv!=null    ? {icon:"mdi:white-balance-sunny",val:String(uv),lbl:"UV index"} : null,
+      vis!=null   ? {icon:"mdi:eye-outline",val:`${Math.round(vis)} km`,lbl:"Visibility"} : null,
     ].filter(Boolean);
 
     return `<section class="gl wx-big">
@@ -495,8 +658,8 @@ class GlassDashboardCard extends HTMLElement {
         </div>
         <div class="wx-details">
           <div class="wx-det"><ha-icon icon="mdi:water-percent"></ha-icon><div class="wx-det-val">${humidity}%</div><div class="wx-det-lbl">Humidity</div></div>
-          <div class="wx-det"><ha-icon icon="mdi:weather-windy"></ha-icon><div class="wx-det-val">${wind}</div><div class="wx-det-lbl">km/h Wind</div></div>
-          ${extras.map(x => `<div class="wx-det"><ha-icon icon="${x.icon}"></ha-icon><div class="wx-det-val">${x.val}</div><div class="wx-det-lbl">${x.lbl}</div></div>`).join("")}
+          <div class="wx-det"><ha-icon icon="mdi:weather-windy"></ha-icon><div class="wx-det-val">${wind}</div><div class="wx-det-lbl">Wind km/h</div></div>
+          ${extras.map(x=>`<div class="wx-det"><ha-icon icon="${x.icon}"></ha-icon><div class="wx-det-val">${x.val}</div><div class="wx-det-lbl">${x.lbl}</div></div>`).join("")}
         </div>
       </div>
       <div class="wx-sep"></div>
@@ -504,72 +667,88 @@ class GlassDashboardCard extends HTMLElement {
     </section>`;
   }
 
-  teslaButton(action, icon, label, on) {
-    return `<button class="tb ${on ? "on" : ""}" data-tesla="${action}">
-      <ha-icon icon="${icon}"></ha-icon><span>${label}</span>
-    </button>`;
+  lightItem(entity) {
+    const name = (this.attr(entity,"friendly_name",null) || entity.split(".")[1]?.replace(/_/g," ") || entity);
+    const on   = this.isOn(entity);
+    const isLt = entity.startsWith("light.");
+    const braw = isLt ? this.attr(entity,"brightness",null) : null;
+    const bPct = braw !== null ? Math.round(braw / 255 * 100) : null;
+    const icon = isLt ? (on?"mdi:lightbulb":"mdi:lightbulb-outline")
+               : entity.includes("feeder") ? "mdi:food-drumstick-outline"
+               : "mdi:toggle-switch-outline";
+    return `<div class="light-item ${on?"on":""}">
+      <button class="li-toggle" data-entity="${entity}">
+        <div class="li-left">
+          <ha-icon class="li-ico" icon="${icon}"></ha-icon>
+          <div>
+            <div class="li-name">${name}</div>
+            <div class="li-sub">${on?(bPct!=null?bPct+"%":"On"):"Off"}</div>
+          </div>
+        </div>
+        <div class="lisw"></div>
+      </button>
+      ${on && bPct !== null ? `<div class="li-slider-wrap">
+        <ha-icon icon="mdi:brightness-4" style="--mdc-icon-size:12px;opacity:.35;color:#fff;flex-shrink:0"></ha-icon>
+        <input type="range" class="li-slider" min="1" max="100" value="${bPct}" data-brightness-entity="${entity}">
+        <ha-icon icon="mdi:brightness-7" style="--mdc-icon-size:12px;opacity:.7;color:#fff;flex-shrink:0"></ha-icon>
+      </div>` : ""}
+    </div>`;
+  }
+
+  climateDetail(temp, humidity, air) {
+    const rawAq = this.st(air,"0");
+    const aqLbl = this.aqLabel(rawAq);
+    const aqc   = this.aqColor(rawAq);
+    const aqNum = Number.isFinite(Number(rawAq)) ? Number(rawAq).toFixed(0) : rawAq;
+    return `<section class="gl block">
+      <div class="slbl">Climate</div>
+      <div class="clim-row">
+        <div class="clim-col">
+          <div class="cv">${this.fmt(temp,"","--",1)}<span class="cu">°C</span></div>
+          <div class="cl">Temperature</div>
+          <div class="spark-wrap">${this.sparkline(temp)}</div>
+        </div>
+        <div class="clim-sep"></div>
+        <div class="clim-col">
+          <div class="cv">${this.fmt(humidity,"","--",0)}<span class="cu">%</span></div>
+          <div class="cl">Humidity</div>
+          <div class="spark-wrap">${this.sparkline(humidity,"rgba(100,180,255,.8)")}</div>
+        </div>
+        <div class="clim-sep"></div>
+        <div class="clim-col aq-col">
+          <div class="aq-dot" style="background:${aqc};box-shadow:0 0 9px ${aqc}99"></div>
+          <div class="cv" style="color:${aqc};margin-top:3px">${aqNum}<span class="cu" style="color:${aqc}99">µg</span></div>
+          <div class="cl" style="color:${aqc}cc">${aqLbl}</div>
+        </div>
+      </div>
+    </section>`;
   }
 
   roomPage(id, title, sub, entities, temp, humidity, air) {
-    const roomKey = id === "liv" ? "main" : id === "bed" ? "bedroom" : id === "game" ? "game" : "utility";
+    const rk = id==="liv"?"main":id==="bed"?"bedroom":id==="game"?"game":"utility";
     const climate = temp
-      ? `<div class="col">${this.climateDetail(temp, humidity, air)}</div>`
+      ? `<div class="col">${this.climateDetail(temp,humidity,air)}</div>`
       : `<div class="col">${this.sceneList(title)}</div>`;
-    return `<div class="page ${this._tab === id ? "active" : ""} z1">
+    return `<div class="page ${this._tab===id?"active":""} z1">
       <div class="g2">
         <div class="col">
           <section class="gl rp-hero">
             <div class="slbl">${title}</div>
             <div class="rp-title">${title}</div>
             <div class="rp-sub">${sub}</div>
-            <button class="big-toggle ${this.anyOn(entities) ? "on" : ""}" data-room="${roomKey}">
+            <button class="big-toggle ${this.anyOn(entities)?"on":""}" data-room="${rk}">
               <div class="bt-label">All Lights · ${this.countOn(entities)} on</div>
               <div class="sw"></div>
             </button>
           </section>
           <section class="gl block">
             <div class="slbl">Lights</div>
-            <div class="light-list">${entities.map(en => this.lightItem(en)).join("")}</div>
+            <div class="light-list">${entities.map(en=>this.lightItem(en)).join("")}</div>
           </section>
         </div>
         ${climate}
       </div>
     </div>`;
-  }
-
-  lightItem(entity) {
-    const name = this.attr(entity, "friendly_name", entity);
-    const on   = this.isOn(entity);
-    const icon = entity.startsWith("light.") ? "mdi:lightbulb-outline"
-               : entity.includes("camera")   ? "mdi:cctv"
-               : entity.includes("feeder")   ? "mdi:food-drumstick-outline"
-               : "mdi:toggle-switch-outline";
-    return `<button class="light-item ${on ? "on" : ""}" data-entity="${entity}">
-      <div class="li-left">
-        <ha-icon class="li-ico" icon="${icon}"></ha-icon>
-        <div>
-          <div class="li-name">${name}</div>
-          <div class="li-sub">${on ? "On" : "Off"}</div>
-        </div>
-      </div>
-      <div class="lisw"></div>
-    </button>`;
-  }
-
-  climateDetail(temp, humidity, air) {
-    const aqv = this.st(air, "Good");
-    const aqc = this.aqColor(aqv);
-    return `<section class="gl block">
-      <div class="slbl">Climate</div>
-      <div class="clim-detail">
-        <div class="glsm cd"><div class="cd-val">${this.fmt(temp,"","--",0)}<span class="cd-unit">°C</span></div><div class="cd-lbl">Temperature</div></div>
-        <div class="glsm cd"><div class="cd-val">${this.fmt(humidity,"","--",0)}<span class="cd-unit">%</span></div><div class="cd-lbl">Humidity</div></div>
-        <div class="glsm cd-full" style="border-color:${aqc}22">
-          <div style="color:rgba(255,255,255,.38);font-size:9px">Air Quality</div>
-          <div class="cd-aq-val" style="color:${aqc}">${aqv}</div>
-        </div>
-      </div>
-    </section>`;
   }
 
   sceneList(title) {
@@ -580,47 +759,58 @@ class GlassDashboardCard extends HTMLElement {
     </section>`;
   }
 
-  toonPage(camUrl) {
+  toonPage(camSrc) {
     const e = this.entities;
     const feederOn = this.anyOn(e.toonDevices);
-    return `<div class="page ${this._tab === "toon" ? "active" : ""} z1">
+    return `<div class="page ${this._tab==="toon"?"active":""} z1">
       <div class="g2">
         <div class="col">
           <section class="gl rp-hero">
             <div class="slbl">Toon's Room</div>
             <div class="rp-title">Toon's Room</div>
             <div class="rp-sub">Pet feeder · Litter box</div>
-            <div class="pet-status ${feederOn ? "on" : ""}">
+            <div class="pet-status ${feederOn?"on":""}">
               <ha-icon icon="mdi:food-drumstick-outline"></ha-icon>
-              <div><b>${feederOn ? "Active" : "Standby"}</b><span>Feeder controls and monitoring</span></div>
+              <div><b>${feederOn?"Active":"Standby"}</b><span>Feeder controls</span></div>
             </div>
           </section>
           <section class="gl block">
             <div class="slbl">Pet Feeder</div>
-            <div class="light-list">${e.toonDevices.map(en => this.lightItem(en)).join("")}</div>
+            <div class="light-list">${e.toonDevices.map(en=>this.lightItem(en)).join("")}</div>
+          </section>
+          <section class="gl block">
+            <div class="slbl">Litter Box</div>
+            <div class="clim-row">
+              <div class="clim-col">
+                <div class="cv">${this.fmt(e.toonSensors[0],"","--",0)}<span class="cu">g</span></div>
+                <div class="cl">Cat Weight</div>
+              </div>
+              <div class="clim-sep"></div>
+              <div class="clim-col">
+                <div class="cv">${this.fmt(e.toonSensors[2],"","--",0)}</div>
+                <div class="cl">Visits Today</div>
+              </div>
+              <div class="clim-sep"></div>
+              <div class="clim-col">
+                <div class="cv">${this.fmt(e.toonSensors[1],"","--",0)}<span class="cu">s</span></div>
+                <div class="cl">Duration</div>
+              </div>
+            </div>
           </section>
         </div>
         <div class="col">
           <section class="gl block cam-section">
             <div class="slbl-row">
               <div class="slbl" style="margin:0">Pet Feeder Camera</div>
-              <button class="cam-btn" data-action="cam-refresh"><ha-icon icon="mdi:refresh"></ha-icon></button>
+              <button class="cam-btn" data-action="cam-refresh"><ha-icon icon="mdi:refresh"></ha-icon> Refresh</button>
             </div>
             <div class="cam-wrap">
-              <img class="cam-feed" src="${camUrl}" alt="Pet Feeder Camera"
+              <img class="cam-feed" ${camSrc?`src="${camSrc}"`:""}  alt="Pet Feeder Camera"
                    onerror="this.style.display='none';this.nextElementSibling.style.display='flex'">
-              <div class="cam-err" style="display:none">
+              <div class="cam-err" style="${camSrc?"display:none":"display:flex"}">
                 <ha-icon icon="mdi:cctv-off"></ha-icon>
-                <span>Camera unavailable<br><small>Verify entity: ${e.petFeederCamera}</small></span>
+                <span>Camera unavailable<br><small>${e.petFeederCamera}</small></span>
               </div>
-            </div>
-          </section>
-          <section class="gl block">
-            <div class="slbl">Litter Box</div>
-            <div class="clim-detail">
-              <div class="glsm cd"><div class="cd-val">${this.fmt(e.toonSensors[0],"","--",0)}<span class="cd-unit">g</span></div><div class="cd-lbl">Cat Weight</div></div>
-              <div class="glsm cd"><div class="cd-val">${this.fmt(e.toonSensors[2],"","--",0)}</div><div class="cd-lbl">Visits Today</div></div>
-              <div class="glsm cd-full"><div>Last duration</div><div class="cd-aq-val">${this.fmt(e.toonSensors[1],"s","--",0)}</div></div>
             </div>
           </section>
         </div>
@@ -628,244 +818,254 @@ class GlassDashboardCard extends HTMLElement {
     </div>`;
   }
 
+  // ── CSS ───────────────────────────────────────────────────────────────────────
   css() { return `
-:host{display:block}
-ha-card{background:transparent;border:0;box-shadow:none;overflow:visible}
+:host{display:block;width:100%}
+ha-card{background:transparent;border:0;box-shadow:none;overflow:visible;min-height:100vh}
 *{box-sizing:border-box;margin:0;padding:0}
-button{font:inherit;color:inherit;border:0;text-align:inherit;cursor:pointer}
+button{font:inherit;color:inherit;border:0;text-align:inherit;cursor:pointer;background:none}
 
-/* Shell */
-.dash{width:100%;max-width:1240px;margin:0 auto;min-height:700px;border-radius:16px;overflow:hidden;display:flex;flex-direction:column;font-family:-apple-system,BlinkMacSystemFont,"SF Pro Display",system-ui,sans-serif;position:relative;background:#060818}
-.bg{position:absolute;inset:0;background:radial-gradient(ellipse 80% 60% at 15% 85%,rgba(0,180,255,.42) 0%,transparent 55%),radial-gradient(ellipse 60% 50% at 80% 10%,rgba(130,60,255,.38) 0%,transparent 55%),radial-gradient(ellipse 50% 40% at 50% 50%,rgba(30,10,80,.8) 0%,transparent 70%),linear-gradient(160deg,#06091c 0%,#0b0630 40%,#050c1e 100%);pointer-events:none}
-.bg::after{content:"";position:absolute;inset:0;background:radial-gradient(ellipse 30% 20% at 10% 70%,rgba(0,220,255,.22) 0%,transparent 50%)}
+/* Shell — full viewport, no max-width */
+.dash{width:100%;min-height:100vh;max-width:none;border-radius:0;display:flex;flex-direction:column;font-family:-apple-system,BlinkMacSystemFont,"SF Pro Display",system-ui,sans-serif;position:relative;background:#060818;overflow:hidden}
+.bg{position:absolute;inset:0;background:radial-gradient(ellipse 80% 60% at 15% 85%,rgba(0,180,255,.42),transparent 55%),radial-gradient(ellipse 60% 50% at 80% 10%,rgba(130,60,255,.38),transparent 55%),radial-gradient(ellipse 50% 40% at 50% 50%,rgba(30,10,80,.8),transparent 70%),linear-gradient(160deg,#06091c 0%,#0b0630 40%,#050c1e 100%);pointer-events:none}
+.bg::after{content:"";position:absolute;inset:0;background:radial-gradient(ellipse 30% 20% at 10% 70%,rgba(0,220,255,.22),transparent 50%)}
 .z1{position:relative;z-index:1}
 
-/* Glass atoms */
+/* Glass */
 .gl{background:rgba(255,255,255,.07);border:1px solid rgba(255,255,255,.13);backdrop-filter:blur(24px);-webkit-backdrop-filter:blur(24px);border-radius:14px}
 .glsm{background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.08);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);border-radius:10px}
-.slbl{font-size:8px;font-weight:700;color:rgba(255,255,255,.38);letter-spacing:1.1px;text-transform:uppercase;margin-bottom:6px}
-.block{padding:8px}
+.slbl{font-size:9px;font-weight:700;color:rgba(255,255,255,.38);letter-spacing:1.1px;text-transform:uppercase;margin-bottom:7px}
+.block{padding:10px}
 
 /* Topbar */
-.topbar{display:flex;align-items:center;justify-content:space-between;padding:8px 14px 5px}
-.home-lbl{font-size:10px;font-weight:700;color:rgba(255,255,255,.55);letter-spacing:1.4px;text-transform:uppercase}
-.home-sub{font-size:8.5px;color:rgba(255,255,255,.32);margin-top:1px}
+.topbar{display:flex;align-items:center;justify-content:space-between;padding:10px 16px 6px}
+.home-lbl{font-size:12px;font-weight:700;color:rgba(255,255,255,.55);letter-spacing:1.4px;text-transform:uppercase}
+.home-sub{font-size:9px;color:rgba(255,255,255,.32);margin-top:1px}
 .clock-wrap{text-align:right}
-.clk-time{font-size:18px;font-weight:200;color:rgba(255,255,255,.92);letter-spacing:-1px;line-height:1}
-.clk-date{font-size:9.5px;color:rgba(255,255,255,.5);margin-top:1px}
+.clk-time{font-size:22px;font-weight:200;color:rgba(255,255,255,.92);letter-spacing:-1px;line-height:1}
+.clk-date{font-size:10px;color:rgba(255,255,255,.5);margin-top:1px}
 
 /* Tabs */
-.tabs{display:flex;gap:3px;padding:0 10px 6px;overflow-x:auto;scrollbar-width:none}
+.tabs{display:flex;gap:4px;padding:0 12px 7px;overflow-x:auto;scrollbar-width:none}
 .tabs::-webkit-scrollbar{display:none}
-.tab{flex-shrink:0;display:flex;align-items:center;gap:5px;padding:5px 9px;border-radius:20px;font-size:10px;font-weight:700;color:rgba(255,255,255,.48);border:1px solid rgba(255,255,255,.06);background:rgba(255,255,255,.05);transition:all .18s, transform .08s;white-space:nowrap}
-.tab ha-icon{--mdc-icon-size:12px;opacity:.7}
+.tab{flex-shrink:0;display:flex;align-items:center;gap:5px;padding:6px 11px;border-radius:20px;font-size:11px;font-weight:700;color:rgba(255,255,255,.48);border:1px solid rgba(255,255,255,.06);background:rgba(255,255,255,.05);transition:all .18s,transform .08s;white-space:nowrap}
+.tab ha-icon{--mdc-icon-size:13px;opacity:.7}
 .tab:hover{color:rgba(255,255,255,.70);background:rgba(255,255,255,.09)}
 .tab.active{background:rgba(255,255,255,.15);border-color:rgba(255,255,255,.28);color:rgba(255,255,255,.96)}
 .tab.active ha-icon{opacity:1}
-.divider{height:1px;background:rgba(255,255,255,.07);margin:0 10px}
+.divider{height:1px;background:rgba(255,255,255,.07);margin:0 12px}
 
-/* Page / grid */
-.page{display:none;flex:1;padding:7px 9px 9px;flex-direction:column}
+/* Page layout */
+.page{display:none;flex:1;padding:8px 10px 10px;flex-direction:column;overflow-y:auto;scrollbar-width:none}
+.page::-webkit-scrollbar{display:none}
 .page.active{display:flex}
-.page-ov{gap:7px}
-.ov-main{display:grid;grid-template-columns:1fr 1fr;gap:7px}
-.g2{display:grid;grid-template-columns:1fr 1fr;gap:7px;width:100%}
-.col{display:flex;flex-direction:column;gap:6px;min-width:0}
+.page-ov{gap:8px}
+.ov-main{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.g2{display:grid;grid-template-columns:1fr 1fr;gap:8px;width:100%}
+.col{display:flex;flex-direction:column;gap:7px;min-width:0}
 
-/* Pressed / active state */
-button{transition:transform .08s ease, filter .08s ease, box-shadow .1s}
-button.is-pressed{transform:scale(.95)!important;filter:brightness(1.18)}
-.tb.is-pressed{box-shadow:0 0 12px rgba(167,139,250,.45)!important}
-.tb.on.is-pressed{box-shadow:0 0 18px rgba(167,139,250,.65)!important}
-.room.is-pressed{box-shadow:0 0 10px rgba(167,139,250,.3)!important}
-.room.on.is-pressed{box-shadow:0 0 14px rgba(167,139,250,.5)!important}
-.light-item.is-pressed{transform:scale(.98)!important}
-.big-toggle.is-pressed{transform:scale(.99)!important}
-.sp-play.is-pressed{box-shadow:0 0 14px rgba(29,185,84,.55)!important}
-.sp-btn.is-pressed{transform:scale(.88)!important}
+/* Press/active */
+button{transition:transform .08s ease,filter .08s ease,box-shadow .1s}
+button.is-pressed{transform:scale(.93)!important;filter:brightness(1.2)}
+.light-item.item-pressed{transform:scale(.99)!important}
+.tb.is-pressed{box-shadow:0 0 14px rgba(167,139,250,.5)!important}
+.tb.on.is-pressed{box-shadow:0 0 20px rgba(167,139,250,.7)!important}
+.room.is-pressed{box-shadow:0 0 12px rgba(167,139,250,.35)!important}
+.sp-play.is-pressed{box-shadow:0 0 16px rgba(29,185,84,.6)!important}
+.tc-tbtn.is-pressed{background:rgba(255,255,255,.25)!important}
 
-/* Room buttons */
-.rooms5{display:grid;grid-template-columns:repeat(5,1fr);gap:4px}
-.room{padding:8px 4px 7px;transition:all .18s, transform .08s;position:relative;border-radius:12px;text-align:center}
+/* Rooms */
+.rooms5{display:grid;grid-template-columns:repeat(5,1fr);gap:5px}
+.room{padding:9px 4px 8px;transition:all .18s,transform .08s;position:relative;border-radius:12px;text-align:center}
 .room:hover{background:rgba(255,255,255,.09)}
-.room.on{background:rgba(255,255,255,.11);border-color:rgba(200,180,255,.2)}
-.ri{--mdc-icon-size:15px;color:rgba(255,255,255,.42);margin:0 auto 3px;transition:color .18s;display:block}
+.room.on{background:rgba(255,255,255,.11);border-color:rgba(200,180,255,.22)}
+.ri{--mdc-icon-size:17px;color:rgba(255,255,255,.42);margin:0 auto 3px;display:block;transition:color .18s}
 .room.on .ri{color:rgba(225,215,255,.98)}
-.rn{font-size:8px;font-weight:700;color:rgba(255,255,255,.52);line-height:1.25}
+.rn{font-size:9px;font-weight:700;color:rgba(255,255,255,.52);line-height:1.25}
 .room.on .rn{color:rgba(255,255,255,.94)}
-.rdot{position:absolute;top:5px;right:5px;width:4px;height:4px;border-radius:50%;background:rgba(255,255,255,.1)}
+.rdot{position:absolute;top:5px;right:5px;width:5px;height:5px;border-radius:50%;background:rgba(255,255,255,.1)}
 .room.on .rdot{background:#a78bfa}
 .alloff .rdot{background:rgba(248,113,113,.35)}
 .alloff .ri{color:rgba(248,113,113,.55)}
+.tag{font-size:9px;color:rgba(255,255,255,.6);background:rgba(255,255,255,.1);padding:3px 8px;border-radius:9px;border:1px solid rgba(255,255,255,.13);text-transform:capitalize}
 
-/* Climate summary (split layout with prominent AQ) */
-.clim-split{display:grid;grid-template-columns:auto 1fr;gap:5px}
-.clim-left{display:flex;flex-direction:column;gap:4px}
-.ci-sm{padding:5px 8px;text-align:center;min-width:58px}
-.cv-sm{font-size:14px;font-weight:300;color:rgba(255,255,255,.96);letter-spacing:-0.5px;line-height:1}
-.cu-sm{font-size:8px;color:rgba(255,255,255,.52)}
-.cl-sm{font-size:7px;color:rgba(255,255,255,.42);margin-top:2px;text-transform:uppercase;letter-spacing:.5px}
-.aq-badge{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;padding:8px}
-.aq-pulse{width:9px;height:9px;border-radius:50%;flex-shrink:0;animation:aq-breathe 2.5s ease-in-out infinite}
-@keyframes aq-breathe{0%,100%{opacity:1;transform:scale(1)}50%{opacity:.65;transform:scale(0.85)}}
-.aq-val{font-size:14px;font-weight:800;text-transform:capitalize;line-height:1}
-.aq-lbl{font-size:7px;color:rgba(255,255,255,.38);text-transform:uppercase;letter-spacing:.8px}
+/* Climate summary — 3-col with sparklines */
+.clim-row{display:grid;grid-template-columns:1fr auto 1fr auto 1fr;align-items:start;gap:0}
+.clim-sep{width:1px;height:100%;min-height:60px;background:rgba(255,255,255,.09);margin:0 4px;align-self:stretch}
+.clim-col{padding:2px 6px;text-align:center;display:flex;flex-direction:column;align-items:center}
+.aq-col{justify-content:center;padding-top:4px}
+.cv{font-size:20px;font-weight:300;color:rgba(255,255,255,.95);letter-spacing:-0.8px;line-height:1}
+.cu{font-size:10px;color:rgba(255,255,255,.48)}
+.cl{font-size:8px;color:rgba(255,255,255,.4);text-transform:uppercase;letter-spacing:.5px;margin-top:3px;white-space:nowrap}
+.spark-wrap{width:100%;height:32px;margin-top:6px;overflow:hidden}
+.spark{width:100%;height:32px;display:block}
+.spark-empty{width:100%;height:32px;border-bottom:1px solid rgba(255,255,255,.06)}
+.aq-dot{width:10px;height:10px;border-radius:50%;flex-shrink:0;animation:aq-breathe 2.5s ease-in-out infinite;margin-bottom:4px}
+@keyframes aq-breathe{0%,100%{opacity:1;transform:scale(1)}50%{opacity:.6;transform:scale(.82)}}
 
-/* Tesla */
-.tesla-card{overflow:hidden}
-.car-area{width:100%;height:110px;position:relative;overflow:hidden;background:radial-gradient(ellipse 90% 70% at 50% 60%,rgba(25,25,55,.95) 0%,rgba(8,8,25,.98) 100%);border-radius:12px 12px 0 0;display:flex;align-items:center;justify-content:center}
-.car-glow{position:absolute;bottom:0;left:0;right:0;height:35px;background:radial-gradient(ellipse 80% 100% at 50% 100%,rgba(80,100,220,.18) 0%,transparent 70%)}
-.car-img{width:100%;height:100%;object-fit:contain;object-position:center 60%;filter:drop-shadow(0 10px 16px rgba(0,0,0,.5));user-select:none;pointer-events:none;position:relative;z-index:1}
-.tesla-stats{padding:7px 10px 8px}
-.tesla-hdr{display:flex;justify-content:space-between;align-items:center;margin-bottom:5px}
-.tesla-name{font-size:12px;font-weight:700;color:rgba(255,255,255,.9)}
-.tesla-sub{font-size:7.5px;color:rgba(255,255,255,.44);margin-top:1px}
-.tag{font-size:8px;color:rgba(255,255,255,.6);background:rgba(255,255,255,.1);padding:3px 7px;border-radius:9px;border:1px solid rgba(255,255,255,.13);text-transform:capitalize}
-.batt-row{display:flex;align-items:baseline;justify-content:space-between;margin-bottom:4px}
-.bpct{font-size:22px;font-weight:300;color:#fff;letter-spacing:-1.5px}
-.bpct span{font-size:11px;color:rgba(255,255,255,.5)}
-.bkm{font-size:10px;font-weight:600;color:rgba(255,255,255,.62)}
-.bbar{height:3px;background:rgba(255,255,255,.14);border-radius:2px;margin-bottom:7px}
-.bfill{height:100%;border-radius:2px;background:linear-gradient(90deg,#34d399,#86efac)}
-.tbtns{display:grid;grid-template-columns:repeat(5,1fr);gap:4px}
-.tb{padding:6px 3px;text-align:center;transition:all .18s, transform .08s;border-radius:8px;border:1px solid rgba(255,255,255,.1);background:rgba(255,255,255,.06)}
-.tb:hover{background:rgba(255,255,255,.09)}
-.tb.on{background:rgba(167,139,250,.15);border-color:rgba(167,139,250,.4);box-shadow:0 0 8px rgba(167,139,250,.2)}
-.tb ha-icon{display:block;--mdc-icon-size:13px;color:rgba(255,255,255,.5);margin:0 auto 2px}
+/* Tesla card — Tesla-app style */
+.tc{overflow:hidden;padding:0}
+.tc-top{display:flex;justify-content:space-between;align-items:center;padding:11px 13px 5px}
+.tc-brand{display:flex;align-items:center;gap:8px}
+.tc-t{width:26px;height:26px;background:linear-gradient(145deg,#e00,#900);border-radius:5px;display:flex;align-items:center;justify-content:center;font-size:16px;font-weight:900;color:#fff;font-style:italic;flex-shrink:0;box-shadow:0 2px 8px rgba(200,0,0,.4)}
+.tc-name{font-size:17px;font-weight:700;color:rgba(255,255,255,.92);letter-spacing:-.3px}
+.tc-img-wrap{width:100%;height:165px;position:relative;background:radial-gradient(ellipse 90% 80% at 50% 65%,rgba(18,18,45,.98),rgba(6,6,20,.99) 100%);display:flex;align-items:center;justify-content:center;overflow:hidden}
+.tc-glow{position:absolute;bottom:0;left:0;right:0;height:50px;background:radial-gradient(ellipse 90% 100% at 50% 100%,rgba(60,90,220,.2),transparent 70%);pointer-events:none}
+.tc-car{width:96%;height:100%;object-fit:contain;object-position:center 60%;filter:drop-shadow(0 14px 22px rgba(0,0,0,.65));pointer-events:none;user-select:none;position:relative;z-index:1}
+.tc-stats{padding:9px 13px 6px}
+.tc-batt-row{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:5px}
+.tc-pct{font-size:42px;font-weight:800;letter-spacing:-2.5px;line-height:1}
+.tc-pct span{font-size:16px;font-weight:400;color:rgba(255,255,255,.45);margin-left:2px}
+.tc-range{font-size:14px;font-weight:600;color:rgba(255,255,255,.58)}
+.tc-bar{height:4px;background:rgba(255,255,255,.12);border-radius:2px;margin-bottom:10px;overflow:hidden}
+.tc-fill{height:100%;border-radius:2px;transition:width .4s}
+.tc-clim-row{display:flex;justify-content:space-between;align-items:center}
+.tc-clim-left{display:flex;align-items:center;gap:9px}
+.tc-clim-lbl{font-size:9px;color:rgba(255,255,255,.4);text-transform:uppercase;letter-spacing:.5px}
+.tc-clim-val{font-size:12px;font-weight:600;color:rgba(255,255,255,.68);margin-top:1px}
+.tc-clim-val.climon{color:#34d399}
+.tc-temp-ctrl{display:flex;align-items:center;gap:9px}
+.tc-tbtn{width:30px;height:30px;border-radius:50%;background:rgba(255,255,255,.1);border:1px solid rgba(255,255,255,.18)!important;display:flex;align-items:center;justify-content:center;font-size:20px;line-height:1;color:rgba(255,255,255,.82);transition:all .15s;flex-shrink:0}
+.tc-tbtn:hover{background:rgba(255,255,255,.17)}
+.tc-tval{font-size:15px;font-weight:600;color:rgba(255,255,255,.82);min-width:36px;text-align:center}
+.tc-btns{display:grid;grid-template-columns:repeat(5,1fr);gap:4px;padding:8px 10px;border-top:1px solid rgba(255,255,255,.07)}
+.tb{padding:7px 3px;text-align:center;transition:all .18s,transform .08s;border-radius:9px;border:1px solid rgba(255,255,255,.1);background:rgba(255,255,255,.06)}
+.tb:hover{background:rgba(255,255,255,.1)}
+.tb.on{background:rgba(167,139,250,.16);border-color:rgba(167,139,250,.42);box-shadow:0 0 9px rgba(167,139,250,.22)}
+.tb ha-icon{display:block;--mdc-icon-size:14px;color:rgba(255,255,255,.5);margin:0 auto 3px}
 .tb.on ha-icon{color:#c4b5fd}
-.tb span{font-size:7px;color:rgba(255,255,255,.44);text-transform:uppercase;letter-spacing:.3px;font-weight:700}
-.tb.on span{color:rgba(200,185,255,.8)}
+.tb span{font-size:8px;color:rgba(255,255,255,.44);text-transform:uppercase;letter-spacing:.3px;font-weight:700}
+.tb.on span{color:rgba(200,185,255,.82)}
 
-/* Weather big */
-.wx-big{padding:10px 12px}
+/* Weather */
+.wx-big{padding:11px 13px}
 .wx-hero{display:flex;align-items:center;gap:16px;margin-bottom:10px}
-.wx-hero-left{display:flex;align-items:center;gap:10px;flex-shrink:0}
-.wx-ico-big{--mdc-icon-size:38px;color:rgba(255,255,255,.75)}
-.wx-tmp-big{font-size:30px;font-weight:200;color:rgba(255,255,255,.96);letter-spacing:-1.5px;line-height:1}
-.wx-tmp-big span{font-size:14px;color:rgba(255,255,255,.5)}
-.wx-cond-big{font-size:9px;color:rgba(255,255,255,.5);margin-top:3px;text-transform:capitalize;letter-spacing:.3px}
+.wx-hero-left{display:flex;align-items:center;gap:11px;flex-shrink:0}
+.wx-ico-big{--mdc-icon-size:42px;color:rgba(255,255,255,.75)}
+.wx-tmp-big{font-size:34px;font-weight:200;color:rgba(255,255,255,.96);letter-spacing:-1.5px;line-height:1}
+.wx-tmp-big span{font-size:15px;color:rgba(255,255,255,.48)}
+.wx-cond-big{font-size:10px;color:rgba(255,255,255,.5);margin-top:3px;text-transform:capitalize;letter-spacing:.3px}
 .wx-details{display:flex;gap:6px;flex-wrap:wrap;flex:1}
-.wx-det{display:flex;flex-direction:column;align-items:center;gap:2px;min-width:52px;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.08);border-radius:9px;padding:6px 8px;flex:1}
-.wx-det ha-icon{--mdc-icon-size:14px;color:rgba(255,255,255,.5)}
-.wx-det-val{font-size:12px;font-weight:600;color:rgba(255,255,255,.86)}
-.wx-det-lbl{font-size:7px;color:rgba(255,255,255,.4);text-transform:uppercase;letter-spacing:.4px;text-align:center}
-.wx-sep{height:1px;background:rgba(255,255,255,.08);margin:8px 0}
-.wx-forecast{display:grid;grid-template-columns:repeat(5,1fr);gap:5px}
-.wx-nof{color:rgba(255,255,255,.28);font-size:9px;padding:8px;text-align:center}
-.wx-day{text-align:center;padding:7px 4px}
-.wxdn{font-size:7.5px;color:rgba(255,255,255,.46);text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px}
-.wxdi{--mdc-icon-size:16px;color:rgba(255,255,255,.62);margin-bottom:3px;display:block}
-.wxdh{font-size:11px;font-weight:600;color:rgba(255,255,255,.82)}
-.wxdl{font-size:9px;color:rgba(255,255,255,.4);margin-top:2px}
+.wx-det{display:flex;flex-direction:column;align-items:center;gap:3px;min-width:55px;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.08);border-radius:10px;padding:7px 9px;flex:1}
+.wx-det ha-icon{--mdc-icon-size:15px;color:rgba(255,255,255,.5)}
+.wx-det-val{font-size:13px;font-weight:600;color:rgba(255,255,255,.86)}
+.wx-det-lbl{font-size:8px;color:rgba(255,255,255,.4);text-transform:uppercase;letter-spacing:.4px;text-align:center}
+.wx-sep{height:1px;background:rgba(255,255,255,.08);margin:9px 0}
+.wx-forecast{display:grid;grid-template-columns:repeat(5,1fr);gap:6px}
+.wx-nof{color:rgba(255,255,255,.28);font-size:10px;padding:10px;text-align:center}
+.wx-day{text-align:center;padding:8px 4px}
+.wxdn{font-size:8px;color:rgba(255,255,255,.46);text-transform:uppercase;letter-spacing:.5px;margin-bottom:5px}
+.wxdi{--mdc-icon-size:18px;color:rgba(255,255,255,.62);margin-bottom:4px;display:block}
+.wxdh{font-size:13px;font-weight:600;color:rgba(255,255,255,.82)}
+.wxdl{font-size:10px;color:rgba(255,255,255,.4);margin-top:2px}
 
 /* Spotify */
-.sp2{padding:9px 10px;display:flex;gap:10px;align-items:flex-start}
-.sp-art{width:72px;height:72px;border-radius:8px;object-fit:cover;flex-shrink:0;border:1px solid rgba(255,255,255,.12)}
-.sp-art-empty{width:72px;height:72px;border-radius:8px;flex-shrink:0;background:linear-gradient(145deg,rgba(29,185,84,.25),rgba(29,185,84,.06));border:1px solid rgba(29,185,84,.3);display:flex;align-items:center;justify-content:center}
-.sp-art-empty ha-icon{--mdc-icon-size:30px;color:#1DB954}
+.sp2{padding:10px 11px;display:flex;gap:11px;align-items:flex-start}
+.sp-art{width:78px;height:78px;border-radius:9px;object-fit:cover;flex-shrink:0;border:1px solid rgba(255,255,255,.12)}
+.sp-art-empty{width:78px;height:78px;border-radius:9px;flex-shrink:0;background:linear-gradient(145deg,rgba(29,185,84,.25),rgba(29,185,84,.06));border:1px solid rgba(29,185,84,.3);display:flex;align-items:center;justify-content:center}
+.sp-art-empty ha-icon{--mdc-icon-size:32px;color:#1DB954}
 .sp-body{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px}
-.sp-track{font-size:12px;font-weight:800;color:rgba(255,255,255,.92);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;line-height:1.2}
-.sp-artist{font-size:9px;color:rgba(255,255,255,.55);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.sp-album{font-size:7.5px;color:rgba(255,255,255,.32);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.sp-prog-wrap{margin-top:5px}
+.sp-track{font-size:13px;font-weight:800;color:rgba(255,255,255,.92);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;line-height:1.2}
+.sp-artist{font-size:10px;color:rgba(255,255,255,.55);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.sp-album{font-size:8px;color:rgba(255,255,255,.3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.sp-prog-wrap{margin-top:6px}
 .sp-prog-bar{height:3px;border-radius:3px;background:rgba(255,255,255,.12);overflow:hidden}
 .sp-prog-fill{height:100%;border-radius:3px;background:#1DB954;transition:width .5s linear}
-.sp-times{display:flex;justify-content:space-between;font-size:7px;color:rgba(255,255,255,.32);margin-top:2px}
-.sp-ctrl-row{display:flex;align-items:center;gap:4px;margin-top:5px}
-.sp-btn{background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.1);border-radius:7px;padding:4px 7px;display:flex;align-items:center;justify-content:center;transition:all .15s, transform .08s}
-.sp-btn:hover{background:rgba(255,255,255,.14);color:#fff}
-.sp-btn ha-icon{--mdc-icon-size:14px;color:rgba(255,255,255,.7)}
-.sp-play{background:rgba(29,185,84,.18);border-color:rgba(29,185,84,.38);padding:5px 10px}
+.sp-times{display:flex;justify-content:space-between;font-size:8px;color:rgba(255,255,255,.32);margin-top:2px}
+.sp-ctrl-row{display:flex;align-items:center;gap:5px;margin-top:6px}
+.sp-btn{background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.1)!important;border-radius:8px;padding:5px 8px;display:flex;align-items:center;justify-content:center;transition:all .15s,transform .08s}
+.sp-btn:hover{background:rgba(255,255,255,.14)}
+.sp-btn ha-icon{--mdc-icon-size:15px;color:rgba(255,255,255,.72)}
+.sp-play{background:rgba(29,185,84,.18);border-color:rgba(29,185,84,.38)!important;padding:6px 11px}
 .sp-play:hover{background:rgba(29,185,84,.28)}
-.sp-play ha-icon{--mdc-icon-size:15px;color:#1DB954}
-.sp-sm ha-icon{--mdc-icon-size:11px}
-.sp-vol-group{display:flex;align-items:center;gap:2px;margin-left:auto}
-.sp-vol-lbl{font-size:8px;color:rgba(255,255,255,.42);min-width:24px;text-align:center}
+.sp-play ha-icon{--mdc-icon-size:16px;color:#1DB954}
+.sp-sm ha-icon{--mdc-icon-size:12px}
+.sp-vol-group{display:flex;align-items:center;gap:3px;margin-left:auto}
+.sp-vol-lbl{font-size:9px;color:rgba(255,255,255,.42);min-width:26px;text-align:center}
 
 /* Media strip */
-.media-strip{padding:7px 10px;display:grid;grid-template-columns:1fr 1fr;gap:6px}
-.media-item{display:flex;align-items:center;gap:6px;min-width:0}
-.media-item ha-icon{--mdc-icon-size:16px;color:rgba(255,255,255,.68)}
-.media-item b{display:block;font-size:9px;color:rgba(255,255,255,.86);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.media-item span{display:block;font-size:7.5px;color:rgba(255,255,255,.52);margin-top:1px}
+.media-strip{padding:8px 11px;display:grid;grid-template-columns:1fr 1fr;gap:7px}
+.media-item{display:flex;align-items:center;gap:7px;min-width:0}
+.media-item ha-icon{--mdc-icon-size:17px;color:rgba(255,255,255,.68)}
+.media-item b{display:block;font-size:10px;color:rgba(255,255,255,.86);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.media-item span{display:block;font-size:8px;color:rgba(255,255,255,.52);margin-top:1px}
 
 /* Room pages */
-.rp-hero{padding:10px}
-.rp-title{font-size:16px;font-weight:200;color:rgba(255,255,255,.85);margin-bottom:1px;letter-spacing:-.5px}
-.rp-sub{font-size:8.5px;color:rgba(255,255,255,.25)}
-.big-toggle{width:100%;display:flex;align-items:center;justify-content:space-between;margin-top:8px;padding:9px 11px;border-radius:11px;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.09);transition:all .18s, transform .08s}
+.rp-hero{padding:12px}
+.rp-title{font-size:18px;font-weight:200;color:rgba(255,255,255,.85);margin-bottom:2px;letter-spacing:-.5px}
+.rp-sub{font-size:9px;color:rgba(255,255,255,.25)}
+.big-toggle{width:100%;display:flex;align-items:center;justify-content:space-between;margin-top:9px;padding:10px 12px;border-radius:12px;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.09)!important;transition:all .18s,transform .08s}
 .big-toggle:hover{background:rgba(255,255,255,.09)}
-.big-toggle.on{background:rgba(167,139,250,.13);border-color:rgba(167,139,250,.3);box-shadow:0 0 12px rgba(167,139,250,.15)}
-.bt-label{font-size:10px;font-weight:600;color:rgba(255,255,255,.48)}
-.big-toggle.on .bt-label{color:rgba(200,185,255,.85)}
-.sw{width:32px;height:17px;border-radius:9px;background:rgba(255,255,255,.12);position:relative;transition:background .2s}
-.sw::after{content:"";position:absolute;top:3px;left:3px;width:11px;height:11px;border-radius:50%;background:rgba(255,255,255,.45);transition:all .2s}
+.big-toggle.on{background:rgba(167,139,250,.13);border-color:rgba(167,139,250,.3)!important;box-shadow:0 0 14px rgba(167,139,250,.16)}
+.bt-label{font-size:11px;font-weight:600;color:rgba(255,255,255,.5)}
+.big-toggle.on .bt-label{color:rgba(200,185,255,.87)}
+.sw{width:34px;height:18px;border-radius:9px;background:rgba(255,255,255,.12);position:relative;transition:background .2s}
+.sw::after{content:"";position:absolute;top:3px;left:3px;width:12px;height:12px;border-radius:50%;background:rgba(255,255,255,.42);transition:all .2s}
 .big-toggle.on .sw{background:#7c3aed}
-.big-toggle.on .sw::after{left:18px;background:#fff}
+.big-toggle.on .sw::after{left:19px;background:#fff}
 
-/* Light list */
-.light-list{display:flex;flex-direction:column;gap:4px}
-.light-item{width:100%;display:flex;align-items:center;justify-content:space-between;padding:6px 9px;border-radius:9px;border:1px solid rgba(255,255,255,.1);background:rgba(255,255,255,.06);transition:all .18s, transform .08s}
+/* Light list + brightness slider */
+.light-list{display:flex;flex-direction:column;gap:5px}
+.light-item{border-radius:11px;border:1px solid rgba(255,255,255,.1);background:rgba(255,255,255,.06);transition:background .18s,border-color .18s,box-shadow .18s,transform .08s;overflow:hidden}
 .light-item:hover{background:rgba(255,255,255,.09)}
-.light-item.on{background:rgba(167,139,250,.13);border-color:rgba(167,139,250,.3);box-shadow:0 0 6px rgba(167,139,250,.12)}
-.li-left{display:flex;align-items:center;gap:7px;min-width:0}
-.li-ico{--mdc-icon-size:13px;color:rgba(255,255,255,.5)}
+.light-item.on{background:rgba(167,139,250,.13);border-color:rgba(167,139,250,.3);box-shadow:0 0 7px rgba(167,139,250,.13)}
+.li-toggle{width:100%;display:flex;align-items:center;justify-content:space-between;padding:8px 11px;background:none;border:0!important;cursor:pointer;gap:8px;min-width:0}
+.li-left{display:flex;align-items:center;gap:8px;min-width:0;flex:1}
+.li-ico{--mdc-icon-size:15px;color:rgba(255,255,255,.5);flex-shrink:0}
 .light-item.on .li-ico{color:rgba(220,210,255,.94)}
-.li-name{font-size:9.5px;font-weight:700;color:rgba(255,255,255,.7);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:220px}
+.li-name{font-size:11px;font-weight:700;color:rgba(255,255,255,.72);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;text-align:left}
 .light-item.on .li-name{color:rgba(255,255,255,.94)}
-.li-sub{font-size:7px;color:rgba(255,255,255,.4);margin-top:1px}
-.lisw{width:26px;height:14px;border-radius:7px;background:rgba(255,255,255,.1);position:relative;flex-shrink:0;transition:background .2s}
-.lisw::after{content:"";position:absolute;top:2px;left:2px;width:10px;height:10px;border-radius:50%;background:rgba(255,255,255,.35);transition:all .2s}
+.li-sub{font-size:8px;color:rgba(255,255,255,.4);margin-top:1px;text-align:left}
+.lisw{width:28px;height:15px;border-radius:8px;background:rgba(255,255,255,.1);position:relative;flex-shrink:0;transition:background .2s}
+.lisw::after{content:"";position:absolute;top:2.5px;left:2.5px;width:10px;height:10px;border-radius:50%;background:rgba(255,255,255,.35);transition:all .2s}
 .light-item.on .lisw{background:#7c3aed}
-.light-item.on .lisw::after{left:14px;background:#fff}
+.light-item.on .lisw::after{left:15px;background:#fff}
+.li-slider-wrap{display:flex;align-items:center;gap:5px;padding:0 11px 8px}
+.li-slider{-webkit-appearance:none;appearance:none;flex:1;height:3px;border-radius:3px;background:rgba(167,139,250,.25);outline:none;cursor:pointer}
+.li-slider::-webkit-slider-thumb{-webkit-appearance:none;width:15px;height:15px;border-radius:50%;background:rgba(200,185,255,.92);cursor:pointer;box-shadow:0 1px 5px rgba(0,0,0,.35)}
+.li-slider::-moz-range-thumb{width:15px;height:15px;border-radius:50%;background:rgba(200,185,255,.92);cursor:pointer;border:0}
 
 /* Climate detail */
-.clim-detail{display:grid;grid-template-columns:1fr 1fr;gap:5px}
-.cd{padding:8px;text-align:center}
-.cd-val{font-size:18px;font-weight:200;color:rgba(255,255,255,.85);letter-spacing:-1px;line-height:1}
-.cd-unit{font-size:9px;color:rgba(255,255,255,.28)}
-.cd-lbl{font-size:7px;color:rgba(255,255,255,.24);margin-top:2px;text-transform:uppercase;letter-spacing:.6px}
-.cd-full{grid-column:span 2;padding:7px 10px;display:flex;align-items:center;justify-content:space-between;color:rgba(255,255,255,.38);font-size:9px;border-radius:10px}
-.cd-aq-val{font-size:12px;font-weight:700;text-transform:capitalize}
+.cd-full{grid-column:span 2;padding:7px 10px;display:flex;align-items:center;justify-content:space-between;color:rgba(255,255,255,.38);font-size:10px;border-radius:10px;background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.07)}
+.cd-aq-val{font-size:13px;font-weight:700;text-transform:capitalize}
 
 /* Scenes */
-.scene-item{width:100%;display:flex;align-items:center;justify-content:space-between;padding:7px 10px;border-radius:9px;border:1px solid rgba(255,255,255,.07);background:rgba(255,255,255,.04);transition:all .18s;margin-bottom:4px}
+.scene-item{width:100%;display:flex;align-items:center;justify-content:space-between;padding:8px 11px;border-radius:10px;border:1px solid rgba(255,255,255,.07)!important;background:rgba(255,255,255,.04);transition:all .18s;margin-bottom:5px}
 .scene-item:hover{background:rgba(255,255,255,.07)}
-.sc-left{display:flex;align-items:center;gap:7px}
-.sc-ico{--mdc-icon-size:13px;color:rgba(255,255,255,.24)}
-.sc-name{font-size:9.5px;font-weight:500;color:rgba(255,255,255,.42)}
-.sc-sub{font-size:7px;color:rgba(255,255,255,.18);margin-top:1px}
-.chev{--mdc-icon-size:12px;color:rgba(255,255,255,.16)}
+.sc-left{display:flex;align-items:center;gap:8px}
+.sc-ico{--mdc-icon-size:14px;color:rgba(255,255,255,.26)}
+.sc-name{font-size:10px;font-weight:500;color:rgba(255,255,255,.44)}
+.sc-sub{font-size:8px;color:rgba(255,255,255,.2);margin-top:1px}
+.chev{--mdc-icon-size:13px;color:rgba(255,255,255,.18)}
 
-/* Toon camera */
-.pet-status{display:flex;align-items:center;gap:9px;margin-top:8px;padding:8px 10px;border-radius:10px;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.1)}
+/* Toon / Camera */
+.pet-status{display:flex;align-items:center;gap:10px;margin-top:9px;padding:9px 11px;border-radius:11px;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.1)}
 .pet-status.on{background:rgba(167,139,250,.13);border-color:rgba(167,139,250,.28)}
-.pet-status ha-icon{--mdc-icon-size:20px;color:rgba(255,255,255,.68)}
-.pet-status b{display:block;font-size:10px;color:rgba(255,255,255,.88)}
-.pet-status span{display:block;font-size:8px;color:rgba(255,255,255,.5);margin-top:1px}
+.pet-status ha-icon{--mdc-icon-size:22px;color:rgba(255,255,255,.68)}
+.pet-status b{display:block;font-size:11px;color:rgba(255,255,255,.88)}
+.pet-status span{display:block;font-size:9px;color:rgba(255,255,255,.5);margin-top:1px}
 .cam-section{overflow:hidden}
-.slbl-row{display:flex;align-items:center;justify-content:space-between;margin-bottom:7px}
-.cam-btn{background:rgba(255,255,255,.07);border:1px solid rgba(255,255,255,.12);border-radius:7px;padding:4px 6px;display:flex;align-items:center}
-.cam-btn ha-icon{--mdc-icon-size:12px;color:rgba(255,255,255,.5)}
+.slbl-row{display:flex;align-items:center;justify-content:space-between;margin-bottom:8px}
+.cam-btn{background:rgba(255,255,255,.07);border:1px solid rgba(255,255,255,.12)!important;border-radius:8px;padding:5px 9px;display:flex;align-items:center;gap:4px;font-size:9px;color:rgba(255,255,255,.6);font-weight:700}
+.cam-btn ha-icon{--mdc-icon-size:13px;color:rgba(255,255,255,.5)}
 .cam-btn:hover{background:rgba(255,255,255,.12)}
-.cam-wrap{border-radius:9px;overflow:hidden;background:rgba(0,0,0,.35);min-height:120px;display:flex;align-items:center;justify-content:center}
-.cam-feed{width:100%;height:auto;display:block;border-radius:9px}
-.cam-err{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:7px;padding:20px;color:rgba(255,255,255,.3);font-size:9px;text-align:center;min-height:120px}
-.cam-err ha-icon{--mdc-icon-size:24px}
-.cam-err small{font-size:7.5px;opacity:.7}
+.cam-wrap{border-radius:10px;overflow:hidden;background:rgba(0,0,0,.4);min-height:150px;display:flex;align-items:center;justify-content:center}
+.cam-feed{width:100%;height:auto;display:block;border-radius:10px}
+.cam-err{flex-direction:column;align-items:center;justify-content:center;gap:8px;padding:24px;color:rgba(255,255,255,.3);font-size:10px;text-align:center;min-height:150px}
+.cam-err ha-icon{--mdc-icon-size:28px}
+.cam-err small{font-size:8px;opacity:.7}
 
 /* Responsive */
-@media(max-width:820px){
-  .dash{min-height:calc(100vh - 80px);border-radius:0}
+@media(max-width:840px){
   .ov-main,.g2{grid-template-columns:1fr}
   .rooms5{grid-template-columns:repeat(3,1fr)}
-  .car-area{height:95px}
-  .page{padding:6px}
-  .tab{padding:5px 8px}
+  .tc-img-wrap{height:140px}
   .wx-forecast{grid-template-columns:repeat(3,1fr)}
   .media-strip{grid-template-columns:1fr}
   .sp2{flex-direction:column}
-  .sp-art,.sp-art-empty{width:100%;height:90px;border-radius:8px}
+  .sp-art,.sp-art-empty{width:100%;height:100px}
+  .clim-row{grid-template-columns:1fr auto 1fr}
+  .clim-row .clim-sep:last-of-type,.clim-row .aq-col{display:none}
 }
 `; }
 }
