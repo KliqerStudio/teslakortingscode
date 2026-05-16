@@ -178,19 +178,12 @@ class GlassDashboardCard extends HTMLElement {
     }, 12000);
     this.render();
   }
-  teslaPairingUrl() {
-    return "https://www.tesla.com/_ak/teslakortingscode.com";
-  }
-  openTeslaPairing() {
-    window.open(this.teslaPairingUrl(), "_blank", "noopener,noreferrer");
-  }
   handleTeslaCommandError(err) {
     const msg = String(err?.message || err || "");
     if (/key|paired|signed command|whitelist/i.test(msg)) {
       this.showNotice(
         "Tesla key not paired",
-        "Pair the Home Assistant virtual key with your Model 3 before climate, charge, lock, or defrost commands will work.",
-        { label: "Pair key", url: this.teslaPairingUrl() }
+        "Open the Tesla app or vehicle Locks screen and confirm Home Assistant is still paired for commands."
       );
       return true;
     }
@@ -884,7 +877,6 @@ class GlassDashboardCard extends HTMLElement {
     });
     this.shadowRoot.querySelector("[data-tesla='temp-up']")  ?.addEventListener("click", () => this.setClimateTemp(0.5));
     this.shadowRoot.querySelector("[data-tesla='temp-down']")?.addEventListener("click", () => this.setClimateTemp(-0.5));
-    this.shadowRoot.querySelector("[data-tesla='pair-key']") ?.addEventListener("click", () => this.openTeslaPairing());
     this.shadowRoot.querySelector("[data-notice-url]")       ?.addEventListener("click", e => window.open(e.currentTarget.dataset.noticeUrl, "_blank", "noopener,noreferrer"));
 
     // Spotify
@@ -1098,10 +1090,7 @@ class GlassDashboardCard extends HTMLElement {
             <div class="tc-name">Model 3</div>
             <div class="tc-sub">Tesla</div>
           </div>
-          <div class="tc-top-actions">
-            <div class="tag">${place}</div>
-            <button class="tag tc-pair" data-tesla="pair-key">Pair key</button>
-          </div>
+          <div class="tag">${place}</div>
         </div>
         <div class="tc-img-wrap">
           <div class="tc-glow"></div>
@@ -1504,8 +1493,6 @@ button.is-pressed{transform:scale(.93)!important;filter:brightness(1.2)}
 /* Single wrapper gives header + car image one unified dark background */
 .tc-hero{background:linear-gradient(180deg,rgba(16,10,38,.98) 0%,rgba(5,5,18,.99) 100%)}
 .tc-top{display:flex;justify-content:space-between;align-items:center;padding:10px 12px 3px;background:transparent}
-.tc-top-actions{display:flex;align-items:center;gap:6px}
-.tc-pair{cursor:pointer;background:rgba(52,211,153,.10);border-color:rgba(52,211,153,.30)!important;color:rgba(167,243,208,.88);font-weight:800}
 .tc-brand{display:flex;align-items:center;gap:8px}
 .tc-name{font-size:17px;font-weight:700;color:rgba(255,255,255,.92);letter-spacing:-.3px}
 .tc-sub{font-size:9px;color:rgba(255,255,255,.38);letter-spacing:.8px;text-transform:uppercase;margin-top:1px}
