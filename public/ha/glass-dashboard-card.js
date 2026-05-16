@@ -17,6 +17,8 @@ class GlassDashboardCard extends HTMLElement {
     this._lastSig = "";
     this._renderDebounce = null;
     this._optimistic = new Map();
+    this._notice = null;
+    this._noticeTimer = null;
     this._audioCtx = null;
     this._lastClickSound = 0;
     this._energy = { prefs: null, stats: {}, period: "day", loadedAt: {}, loading: false };
@@ -77,6 +79,7 @@ class GlassDashboardCard extends HTMLElement {
   disconnectedCallback() {
     if (this._timer)    { window.clearInterval(this._timer);    this._timer    = null; }
     if (this._camTimer) { window.clearInterval(this._camTimer); this._camTimer = null; }
+    if (this._noticeTimer) window.clearTimeout(this._noticeTimer);
     this._audioCtx?.close?.();
     this._audioCtx = null;
   }
@@ -166,6 +169,34 @@ class GlassDashboardCard extends HTMLElement {
     const until = Date.now() + ttl;
     entities.forEach(entity => this._optimistic.set(entity, { state, until }));
   }
+  showNotice(title, body, action = null) {
+    this._notice = { title, body, action };
+    if (this._noticeTimer) window.clearTimeout(this._noticeTimer);
+    this._noticeTimer = window.setTimeout(() => {
+      this._notice = null;
+      this.render();
+    }, 12000);
+    this.render();
+  }
+  teslaPairingUrl() {
+    return "https://www.tesla.com/_ak/teslakortingscode.com";
+  }
+  openTeslaPairing() {
+    window.open(this.teslaPairingUrl(), "_blank", "noopener,noreferrer");
+  }
+  handleTeslaCommandError(err) {
+    const msg = String(err?.message || err || "");
+    if (/key|paired|signed command|whitelist/i.test(msg)) {
+      this.showNotice(
+        "Tesla key not paired",
+        "Pair the Home Assistant virtual key with your Model 3 before climate, charge, lock, or defrost commands will work.",
+        { label: "Pair key", url: this.teslaPairingUrl() }
+      );
+      return true;
+    }
+    this.showNotice("Tesla command failed", msg || "Home Assistant could not send the command.");
+    return true;
+  }
   anyOn(entities)   { return this.actionable(entities).some(e => this.isOn(e)); }
   countOn(entities) { return this.actionable(entities).filter(e => this.isOn(e)).length; }
   service(domain, svc, data) { return this._hass?.callService(domain, svc, data); }
@@ -181,7 +212,8 @@ class GlassDashboardCard extends HTMLElement {
         await this.service(domain, targetOn ? "turn_on" : "turn_off", { entity_id: entity });
       } catch (err) {
         this._optimistic.delete(entity);
-        this.render();
+        if (entity.includes("model_3")) this.handleTeslaCommandError(err);
+        else this.render();
         console.warn("[GlassDash] toggle entity failed:", entity, err);
       }
       return;
@@ -189,6 +221,7 @@ class GlassDashboardCard extends HTMLElement {
     try {
       await this.service(domain, "toggle", { entity_id: entity });
     } catch (err) {
+      if (entity.includes("model_3")) this.handleTeslaCommandError(err);
       console.warn("[GlassDash] generic toggle failed:", entity, err);
     }
   }
@@ -215,16 +248,30 @@ class GlassDashboardCard extends HTMLElement {
     this.render();
     this.service("homeassistant","turn_off",{ entity_id: targets });
   }
-  toggleClimate() {
+  async toggleClimate() {
     const cur = this._hass?.states?.[this.entities.teslaClimate]?.state;
-    this.service("climate", cur === "off" ? "turn_on" : "turn_off", { entity_id: this.entities.teslaClimate });
+    const targetOn = cur === "off";
+    this.setOptimistic([this.entities.teslaClimate], targetOn ? "heat" : "off");
+    this.render();
+    try {
+      await this.service("climate", targetOn ? "turn_on" : "turn_off", { entity_id: this.entities.teslaClimate });
+    } catch (err) {
+      this._optimistic.delete(this.entities.teslaClimate);
+      this.handleTeslaCommandError(err);
+      console.warn("[GlassDash] Tesla climate failed:", err);
+    }
   }
-  setClimateTemp(delta) {
+  async setClimateTemp(delta) {
     const cur = Number(this.attr(this.entities.teslaClimate,"temperature",22));
-    this.service("climate","set_temperature",{
-      entity_id: this.entities.teslaClimate,
-      temperature: Math.round((cur + delta) * 2) / 2,
-    });
+    try {
+      await this.service("climate","set_temperature",{
+        entity_id: this.entities.teslaClimate,
+        temperature: Math.round((cur + delta) * 2) / 2,
+      });
+    } catch (err) {
+      this.handleTeslaCommandError(err);
+      console.warn("[GlassDash] Tesla temp failed:", err);
+    }
   }
   mediaState(entity, fallback = "idle") {
     if (!entity) return fallback;
@@ -831,9 +878,14 @@ class GlassDashboardCard extends HTMLElement {
     this.shadowRoot.querySelector("[data-tesla='defrost']")  ?.addEventListener("click", () => this.toggleEntity(this.entities.teslaDefrost));
     this.shadowRoot.querySelector("[data-tesla='sentry']")   ?.addEventListener("click", () => this.toggleEntity(this.entities.teslaSentry));
     this.shadowRoot.querySelector("[data-tesla='charge']")   ?.addEventListener("click", () => this.toggleEntity(this.entities.teslaCharge));
-    this.shadowRoot.querySelector("[data-tesla='wake']")     ?.addEventListener("click", () => this.service("button","press",{ entity_id:"button.model_3_wake" }));
+    this.shadowRoot.querySelector("[data-tesla='wake']")     ?.addEventListener("click", async () => {
+      try { await this.service("button","press",{ entity_id:"button.model_3_wake" }); }
+      catch (err) { this.handleTeslaCommandError(err); }
+    });
     this.shadowRoot.querySelector("[data-tesla='temp-up']")  ?.addEventListener("click", () => this.setClimateTemp(0.5));
     this.shadowRoot.querySelector("[data-tesla='temp-down']")?.addEventListener("click", () => this.setClimateTemp(-0.5));
+    this.shadowRoot.querySelector("[data-tesla='pair-key']") ?.addEventListener("click", () => this.openTeslaPairing());
+    this.shadowRoot.querySelector("[data-notice-url]")       ?.addEventListener("click", e => window.open(e.currentTarget.dataset.noticeUrl, "_blank", "noopener,noreferrer"));
 
     // Spotify
     const tgt = () => this.mediaControlTarget();
@@ -1046,7 +1098,10 @@ class GlassDashboardCard extends HTMLElement {
             <div class="tc-name">Model 3</div>
             <div class="tc-sub">Tesla</div>
           </div>
-          <div class="tag">${place}</div>
+          <div class="tc-top-actions">
+            <div class="tag">${place}</div>
+            <button class="tag tc-pair" data-tesla="pair-key">Pair key</button>
+          </div>
         </div>
         <div class="tc-img-wrap">
           <div class="tc-glow"></div>
@@ -1074,6 +1129,13 @@ class GlassDashboardCard extends HTMLElement {
           </div>
         </div>
       </div>
+      ${this._notice ? `<div class="tc-notice">
+        <div>
+          <b>${this._notice.title}</b>
+          <span>${this._notice.body}</span>
+        </div>
+        ${this._notice.action ? `<button class="tc-notice-action" data-notice-url="${this._notice.action.url}">${this._notice.action.label}</button>` : ""}
+      </div>` : ""}
       <div class="tc-btns">
         ${this.teslaButton("climate","mdi:fan",                   "AC",      climOn)}
         ${this.teslaButton("defrost","mdi:car-defrost-front",     "Defrost", this.isOn(this.entities.teslaDefrost))}
@@ -1442,6 +1504,8 @@ button.is-pressed{transform:scale(.93)!important;filter:brightness(1.2)}
 /* Single wrapper gives header + car image one unified dark background */
 .tc-hero{background:linear-gradient(180deg,rgba(16,10,38,.98) 0%,rgba(5,5,18,.99) 100%)}
 .tc-top{display:flex;justify-content:space-between;align-items:center;padding:10px 12px 3px;background:transparent}
+.tc-top-actions{display:flex;align-items:center;gap:6px}
+.tc-pair{cursor:pointer;background:rgba(52,211,153,.10);border-color:rgba(52,211,153,.30)!important;color:rgba(167,243,208,.88);font-weight:800}
 .tc-brand{display:flex;align-items:center;gap:8px}
 .tc-name{font-size:17px;font-weight:700;color:rgba(255,255,255,.92);letter-spacing:-.3px}
 .tc-sub{font-size:9px;color:rgba(255,255,255,.38);letter-spacing:.8px;text-transform:uppercase;margin-top:1px}
@@ -1460,6 +1524,10 @@ button.is-pressed{transform:scale(.93)!important;filter:brightness(1.2)}
 .tc-clim-lbl{font-size:9px;color:rgba(255,255,255,.4);text-transform:uppercase;letter-spacing:.5px}
 .tc-clim-val{font-size:12px;font-weight:600;color:rgba(255,255,255,.68);margin-top:1px}
 .tc-clim-val.climon{color:#34d399}
+.tc-notice{display:flex;align-items:center;justify-content:space-between;gap:10px;margin:0 10px 8px;padding:8px 9px;border-radius:10px;background:rgba(248,113,113,.12);border:1px solid rgba(248,113,113,.26);color:rgba(255,255,255,.86)}
+.tc-notice b{display:block;font-size:10px;color:#fecaca;letter-spacing:.2px}
+.tc-notice span{display:block;font-size:9px;color:rgba(255,255,255,.62);line-height:1.35;margin-top:1px}
+.tc-notice-action{flex-shrink:0;padding:5px 8px;border-radius:8px;background:rgba(52,211,153,.16);border:1px solid rgba(52,211,153,.32)!important;color:rgba(167,243,208,.95);font-size:9px;font-weight:800}
 .tc-temp-ctrl{display:flex;align-items:center;gap:9px}
 .tc-tbtn{width:30px;height:30px;border-radius:50%;background:rgba(255,255,255,.1);border:1px solid rgba(255,255,255,.18)!important;display:flex;align-items:center;justify-content:center;font-size:20px;line-height:1;color:rgba(255,255,255,.82);transition:all .15s;flex-shrink:0}
 .tc-tbtn:hover{background:rgba(255,255,255,.17)}
