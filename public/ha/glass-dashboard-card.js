@@ -565,13 +565,20 @@ class GlassDashboardCard extends HTMLElement {
   updateClock() {
     const ti = this.shadowRoot.getElementById("clk-t");
     const da = this.shadowRoot.getElementById("clk-d");
+    const gr = this.shadowRoot.getElementById("greeting");
     if (!ti||!da) return;
     const now = new Date();
-    ti.textContent = now.toLocaleTimeString([],{hour:"2-digit",minute:"2-digit"});
-    da.textContent = now.toLocaleDateString([],{weekday:"short",day:"numeric",month:"long"});
+    ti.textContent = now.toLocaleTimeString([],{hour:"2-digit",minute:"2-digit",timeZone:"Europe/Amsterdam"});
+    da.textContent = now.toLocaleDateString([],{weekday:"short",day:"numeric",month:"long",timeZone:"Europe/Amsterdam"});
+    if (gr) gr.textContent = this.greeting();
   }
   greeting() {
-    const h = new Date().getHours();
+    const parts = new Intl.DateTimeFormat("en-GB", {
+      hour: "numeric",
+      hour12: false,
+      timeZone: "Europe/Amsterdam",
+    }).formatToParts(new Date());
+    const h = Number(parts.find(part => part.type === "hour")?.value ?? new Date().getHours());
     return h < 12 ? "Good morning" : h < 18 ? "Good afternoon" : "Good evening";
   }
   toggleFullscreen() {
@@ -637,7 +644,7 @@ class GlassDashboardCard extends HTMLElement {
 
   <div class="topbar z1">
     <div>
-      <div class="home-lbl">${this.greeting()}</div>
+      <div class="home-lbl" id="greeting">${this.greeting()}</div>
       <div class="home-sub">Home overview</div>
     </div>
     <div class="topbar-right">
@@ -1290,7 +1297,7 @@ button{font:inherit;color:inherit;border:0;text-align:inherit;cursor:pointer;bac
 .block{padding:10px}
 
 /* Topbar */
-.topbar{display:flex;align-items:center;justify-content:space-between;padding:8px 12px 5px}
+.topbar{display:flex;align-items:center;justify-content:space-between;padding:10px 14px 5px;z-index:30;isolation:isolate}
 .home-lbl{font-size:12px;font-weight:700;color:rgba(255,255,255,.55);letter-spacing:1.4px;text-transform:uppercase}
 .home-sub{font-size:9px;color:rgba(255,255,255,.32);margin-top:1px}
 .topbar-right{display:flex;align-items:center;gap:9px}
@@ -1368,9 +1375,9 @@ button.is-pressed{transform:scale(.93)!important;filter:brightness(1.2)}
 .tc-brand{display:flex;align-items:center;gap:8px}
 .tc-name{font-size:17px;font-weight:700;color:rgba(255,255,255,.92);letter-spacing:-.3px}
 .tc-sub{font-size:9px;color:rgba(255,255,255,.38);letter-spacing:.8px;text-transform:uppercase;margin-top:1px}
-.tc-img-wrap{width:100%;height:118px;position:relative;background:transparent;display:flex;align-items:center;justify-content:center;overflow:hidden}
+.tc-img-wrap{width:100%;height:134px;position:relative;background:transparent;display:flex;align-items:center;justify-content:center;overflow:hidden}
 .tc-glow{position:absolute;bottom:0;left:0;right:0;height:50px;background:radial-gradient(ellipse 90% 100% at 50% 100%,rgba(60,90,220,.2),transparent 70%);pointer-events:none}
-.tc-car{width:86%;height:88%;object-fit:contain;object-position:center center;filter:drop-shadow(0 12px 18px rgba(0,0,0,.62));pointer-events:none;user-select:none;position:relative;z-index:1;transform:translateY(7px)}
+.tc-car{width:98%;height:100%;object-fit:contain;object-position:center center;filter:drop-shadow(0 13px 19px rgba(0,0,0,.64));pointer-events:none;user-select:none;position:relative;z-index:1;transform:translateY(9px)}
 .tc-stats{padding:7px 11px 5px}
 .tc-batt-row{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:5px}
 .tc-pct{font-size:34px;font-weight:800;letter-spacing:-2px;line-height:1}
@@ -1545,8 +1552,8 @@ button.is-pressed{transform:scale(.93)!important;filter:brightness(1.2)}
 @media(max-width:840px){
   .ov-main,.g2{grid-template-columns:1fr}
   .rooms5{grid-template-columns:repeat(3,1fr)}
-  .tc-img-wrap{height:110px}
-  .tc-car{width:92%}
+  .tc-img-wrap{height:124px}
+  .tc-car{width:100%}
   .wx-forecast{grid-template-columns:repeat(3,1fr)}
   .media-strip{grid-template-columns:1fr}
   .sp2{flex-direction:column}

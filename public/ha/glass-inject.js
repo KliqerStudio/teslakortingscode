@@ -132,7 +132,16 @@
   const kioskCss = `
     app-header,
     app-toolbar,
+    app-header-layout > app-header,
+    app-header-layout app-toolbar,
     ha-menu-button,
+    ha-button-menu,
+    ha-icon-button[slot="actionItems"],
+    app-toolbar ha-icon-button,
+    app-toolbar ha-button-menu,
+    app-toolbar [slot="actionItems"],
+    app-toolbar .action-items,
+    app-toolbar .toolbar-actions,
     ha-sidebar,
     home-assistant-sidebar,
     app-drawer,
@@ -146,6 +155,10 @@
       min-height: 0 !important;
       opacity: 0 !important;
       pointer-events: none !important;
+    }
+
+    app-header-layout {
+      padding-top: 0 !important;
     }
 
     app-drawer-layout {
@@ -229,6 +242,8 @@
     }
 
     if (
+      tag === "app-header" ||
+      tag === "app-toolbar" ||
       tag === "app-drawer" ||
       tag === "wa-drawer" ||
       tag === "ha-sidebar" ||
@@ -239,6 +254,14 @@
       el.style.setProperty("width", "0", "important");
       el.style.setProperty("min-width", "0", "important");
       el.style.setProperty("max-width", "0", "important");
+    }
+
+    if (
+      tag === "ha-button-menu" ||
+      (tag === "ha-icon-button" && el.getAttribute("slot") === "actionItems")
+    ) {
+      el.style.setProperty("display", "none", "important");
+      el.style.setProperty("pointer-events", "none", "important");
     }
 
     if (
