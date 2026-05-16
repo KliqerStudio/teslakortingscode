@@ -894,6 +894,9 @@ class GlassDashboardCard extends HTMLElement {
       <div class="home-sub">Home overview</div>
     </div>
     <div class="topbar-right">
+      <button class="fs-btn" data-action="sleep" title="Sleep screen">
+        <ha-icon icon="mdi:weather-night"></ha-icon>
+      </button>
       <button class="fs-btn" data-action="fullscreen" title="Toggle fullscreen">
         <ha-icon icon="mdi:${document.fullscreenElement ? 'fullscreen-exit' : 'fullscreen'}"></ha-icon>
       </button>
@@ -1035,6 +1038,10 @@ class GlassDashboardCard extends HTMLElement {
     this.shadowRoot.querySelector("[data-action='cam-refresh']")?.addEventListener("click", () => this.updateCamera());
 
     this.shadowRoot.querySelector("[data-action='fullscreen']")?.addEventListener("click", () => this.toggleFullscreen());
+    this.shadowRoot.querySelector("[data-action='sleep']")?.addEventListener("click", () => {
+      this._presence.lastMotion = 0; // force idle
+      this._sleepScreen();
+    });
 
     this.shadowRoot.querySelector("[data-action='forecast-retry']")?.addEventListener("click", () => {
       this._forecastLoadedAt = 0;
@@ -1218,7 +1225,7 @@ class GlassDashboardCard extends HTMLElement {
   _bucketLabel(dt, period) {
     const d = new Date(dt);
     const h = d.getHours();
-    if (period === "day")   return h % 4 === 0 ? d.toLocaleTimeString([], { hour: "numeric", hour12: false }) : "";
+    if (period === "day")   return h % 6 === 0 ? d.toLocaleTimeString([], { hour: "2-digit", hour12: false }).replace(":00", "") : "";
     if (period === "week")  return d.toLocaleDateString([], { weekday: "short" });
     if (period === "month") { const day = d.getDate(); return (day === 1 || day % 5 === 0) ? String(day) : ""; }
     return d.toLocaleDateString([], { month: "short" });
@@ -1227,7 +1234,7 @@ class GlassDashboardCard extends HTMLElement {
   _energyBars(buckets) {
     if (!buckets.length) return "";
     const maxV = Math.max(...buckets.map(b => b.kwh), 0.001);
-    const W = 280, H = 60, labelH = 10, chartH = H - labelH;
+    const W = 280, H = 64, labelH = 14, chartH = H - labelH;
     const n = buckets.length;
     const step = W / n;
     const barW = Math.max(1.5, step * 0.72);
@@ -1240,7 +1247,7 @@ class GlassDashboardCard extends HTMLElement {
       const fill = cur ? "rgba(251,191,36,.95)" : "rgba(167,139,250,.52)";
       const lbl  = this._bucketLabel(b.start, this._energy.period);
       return `<rect x="${x.toFixed(1)}" y="${y.toFixed(1)}" width="${barW.toFixed(1)}" height="${bh.toFixed(1)}" rx="2" fill="${fill}"/>` +
-        (lbl ? `<text x="${(x+barW/2).toFixed(1)}" y="${H-1}" font-size="6" fill="rgba(255,255,255,.3)" text-anchor="middle" font-family="system-ui,sans-serif">${lbl}</text>` : "");
+        (lbl ? `<text class="en-axis-label" x="${(x+barW/2).toFixed(1)}" y="${H-2}" text-anchor="middle">${lbl}</text>` : "");
     }).join("");
     return `<svg class="en-svg" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none">${bars}</svg>`;
   }
