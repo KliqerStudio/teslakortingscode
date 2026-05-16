@@ -16,6 +16,9 @@ class GlassDashboardCard extends HTMLElement {
     this._camFetching = false;
     this._lastSig = "";
     this._renderDebounce = null;
+    this._optimistic = new Map();
+    this._audioCtx = null;
+    this._lastClickSound = 0;
     this._energy = { prefs: null, stats: {}, period: "day", loadedAt: {}, loading: false };
     this._energyRate = 0.29; // €/kWh — change to match your contract
     this.entities = {
@@ -25,10 +28,11 @@ class GlassDashboardCard extends HTMLElement {
         "light.led_strip_4","light.govee_tv_left","light.govee_tv_right",
         "light.rgbic_tv_backlight","light.tv_left","light.tv_right","light.marylin",
       ],
-      bedroomLights: ["light.bed","light.kast","light.closet"],
+      bedroomLights: ["light.bed","light.kast","light.closet","light.ants_closet","switch.night_light"],
       gameLights: [
         "light.plafond","light.desk_lamp","light.desk_led_strip",
         "light.battletron_smart_desk_light_strip","light.battletron_smart_desk_light_strip_2",
+        "light.watch_light",
       ],
       utilityLights: ["light.toilet","light.hallway_door"],
       livingTemp:     "sensor.living_room_sensor_temperature",
@@ -73,6 +77,8 @@ class GlassDashboardCard extends HTMLElement {
   disconnectedCallback() {
     if (this._timer)    { window.clearInterval(this._timer);    this._timer    = null; }
     if (this._camTimer) { window.clearInterval(this._camTimer); this._camTimer = null; }
+    this._audioCtx?.close?.();
+    this._audioCtx = null;
   }
 
   set hass(hass) {
@@ -114,6 +120,8 @@ class GlassDashboardCard extends HTMLElement {
 
   // ── Helpers ─────────────────────────────────────────────────────────────────
   st(entity, fallback = "Unknown") {
+    const opt = this.optimisticState(entity);
+    if (opt) return opt;
     const s = this._hass?.states?.[entity]?.state;
     if (!s || s === "unavailable" || s === "unknown") return fallback;
     return s;
@@ -133,23 +141,79 @@ class GlassDashboardCard extends HTMLElement {
     return s.replaceAll("_"," ").replace(/\b\w/g, c => c.toUpperCase());
   }
   isOn(entity) {
+    const opt = this.optimisticState(entity);
     return ["on","heat","cool","playing","home","open"].includes(
-      this._hass?.states?.[entity]?.state
+      opt || this._hass?.states?.[entity]?.state
     );
   }
-  anyOn(entities)   { return entities.some(e => this.isOn(e)); }
-  countOn(entities) { return entities.filter(e => this.isOn(e)).length; }
+  isAvailable(entity) {
+    const s = this._hass?.states?.[entity]?.state;
+    return Boolean(s && s !== "unavailable" && s !== "unknown");
+  }
+  actionable(entities) {
+    return entities.filter(entity => this._hass?.states?.[entity] && this.isAvailable(entity));
+  }
+  optimisticState(entity) {
+    const opt = this._optimistic.get(entity);
+    if (!opt) return null;
+    if (opt.until < Date.now()) {
+      this._optimistic.delete(entity);
+      return null;
+    }
+    return opt.state;
+  }
+  setOptimistic(entities, state, ttl = 3000) {
+    const until = Date.now() + ttl;
+    entities.forEach(entity => this._optimistic.set(entity, { state, until }));
+  }
+  anyOn(entities)   { return this.actionable(entities).some(e => this.isOn(e)); }
+  countOn(entities) { return this.actionable(entities).filter(e => this.isOn(e)).length; }
   service(domain, svc, data) { return this._hass?.callService(domain, svc, data); }
-  toggleEntity(entity) { this.service(entity.split(".")[0], "toggle", { entity_id: entity }); }
-  toggleGroup(entities) {
-    const anyOn = entities.some(e => this.isOn(e));
-    this.service("homeassistant", anyOn ? "turn_off" : "turn_on", { entity_id: entities });
+  async toggleEntity(entity) {
+    if (!this._hass?.states?.[entity] || !this.isAvailable(entity)) return;
+    const domain = entity.split(".")[0];
+    const turnable = ["light","switch","input_boolean","fan"].includes(domain);
+    const targetOn = !this.isOn(entity);
+    if (turnable) {
+      this.setOptimistic([entity], targetOn ? "on" : "off");
+      this.render();
+      try {
+        await this.service(domain, targetOn ? "turn_on" : "turn_off", { entity_id: entity });
+      } catch (err) {
+        this._optimistic.delete(entity);
+        this.render();
+        console.warn("[GlassDash] toggle entity failed:", entity, err);
+      }
+      return;
+    }
+    try {
+      await this.service(domain, "toggle", { entity_id: entity });
+    } catch (err) {
+      console.warn("[GlassDash] generic toggle failed:", entity, err);
+    }
+  }
+  async toggleGroup(entities) {
+    const targets = this.actionable(entities);
+    if (!targets.length) return;
+    const targetOn = !targets.some(e => this.isOn(e));
+    this.setOptimistic(targets, targetOn ? "on" : "off");
+    this.render();
+    try {
+      await this.service("homeassistant", targetOn ? "turn_on" : "turn_off", { entity_id: targets });
+    } catch (err) {
+      targets.forEach(entity => this._optimistic.delete(entity));
+      this.render();
+      console.warn("[GlassDash] toggle group failed:", err);
+    }
   }
   turnOffAll() {
-    this.service("homeassistant","turn_off",{ entity_id:[
+    const targets = this.actionable([
       ...this.entities.mainLights,...this.entities.bedroomLights,
       ...this.entities.gameLights,...this.entities.utilityLights,
-    ]});
+    ]);
+    this.setOptimistic(targets, "off");
+    this.render();
+    this.service("homeassistant","turn_off",{ entity_id: targets });
   }
   toggleClimate() {
     const cur = this._hass?.states?.[this.entities.teslaClimate]?.state;
@@ -545,7 +609,14 @@ class GlassDashboardCard extends HTMLElement {
 
   playClick() {
     try {
-      const ctx = new (window.AudioContext || window.webkitAudioContext)();
+      const now = performance.now();
+      if (now - this._lastClickSound < 45) return;
+      this._lastClickSound = now;
+      const AudioCtx = window.AudioContext || window.webkitAudioContext;
+      if (!AudioCtx) return;
+      const ctx = this._audioCtx || new AudioCtx();
+      this._audioCtx = ctx;
+      if (ctx.state === "suspended") ctx.resume?.();
       const t = ctx.currentTime;
       [{freq:[1100,450],gain:[0.07,0.001],dur:0.07},{freq:[2200,900],gain:[0.035,0.001],dur:0.045}]
         .forEach(({freq,gain,dur}) => {
@@ -558,7 +629,6 @@ class GlassDashboardCard extends HTMLElement {
           g.gain.exponentialRampToValueAtTime(gain[1],t+dur);
           o.start(t); o.stop(t+dur);
         });
-      setTimeout(() => ctx.close(), 400);
     } catch {}
   }
 
