@@ -149,6 +149,12 @@
     hui-sections-view > .header,
     hui-view h1.header,
     hui-view h1.title,
+    hui-view > h1,
+    hui-panel-view h1:first-child,
+    hui-masonry-view h1:first-child,
+    hui-sections-view h1:first-child,
+    hui-view .title,
+    hui-view .header,
     .view-header,
     .view-title,
     .header-title,
@@ -274,7 +280,7 @@
       cls.includes("view-header") ||
       cls.includes("view-title") ||
       cls.includes("header-title") ||
-      (tag === "h1" && (cls.includes("header") || cls.includes("title")))
+      (tag === "h1" && (cls.includes("header") || cls.includes("title") || el.textContent?.trim() === "Home"))
     ) {
       el.style.setProperty("display", "none", "important");
       el.style.setProperty("height", "0", "important");
