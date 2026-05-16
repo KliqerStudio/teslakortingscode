@@ -54,6 +54,8 @@ class GlassDashboardCard extends HTMLElement {
       p1Return:       "",
       p1Gas:          "",
       p1EnergyToday:  "sensor.p1_meter_energy_import",
+      vattenfallElectricityPrice: "sensor.stroom_all_in_huidig",
+      vattenfallGasPrice:         "sensor.gas_all_in_huidig",
       spotify:        "media_player.spotify_tristan_pahud_de_mortanges",
       spotifySpeaker: "media_player.dining_room",
       tv:             "media_player.lg_webos_tv_oled65c54la_2",
@@ -107,6 +109,7 @@ class GlassDashboardCard extends HTMLElement {
       e.teslaSentry, e.teslaInsideTemp,
       e.spotify, e.spotifySpeaker, e.tv, e.petFeederCamera,
       e.p1Power, e.p1Return, e.p1EnergyToday,
+      e.vattenfallElectricityPrice, e.vattenfallGasPrice,
     ];
     return watch.filter(Boolean).map(k => {
       const s = this._hass.states?.[k];
@@ -430,6 +433,9 @@ class GlassDashboardCard extends HTMLElement {
             });
           }
         }
+      }
+      if (!consumptionIds.length && this.entities.p1EnergyToday) {
+        consumptionIds = [this.entities.p1EnergyToday];
       }
       this._energy.consumptionIds = consumptionIds;
       this._energy.costIds        = costIds;
@@ -977,6 +983,11 @@ class GlassDashboardCard extends HTMLElement {
     const liveVal   = isLive
       ? (powerW >= 1000 ? (powerW/1000).toFixed(2)+" kW" : Math.round(powerW)+" W")
       : "--";
+    const priceNowRaw = Number(this.st(e.vattenfallElectricityPrice, NaN));
+    const priceNow    = Number.isFinite(priceNowRaw) && priceNowRaw > 0 ? priceNowRaw : this._energyRate;
+    const liveCost    = isLive ? Math.max(0, (powerW / 1000) * priceNow) : NaN;
+    const liveCostTxt = Number.isFinite(liveCost) ? `€${liveCost.toFixed(2)}/h` : "€--/h";
+    const priceTxt    = Number.isFinite(priceNow) ? `€${priceNow.toFixed(2)}/kWh` : "€--/kWh";
 
     // Today kWh + cost from HA Energy stats
     const consumptionIds = this._energy.consumptionIds || [];
@@ -995,7 +1006,7 @@ class GlassDashboardCard extends HTMLElement {
     }
     const todayCost = hasCostStat
       ? todayCostStat.toFixed(2)
-      : (todayKwh * this._energyRate).toFixed(2);
+      : (todayKwh * priceNow).toFixed(2);
 
     // Chart buckets for selected period
     const period      = this._energy.period;
@@ -1013,16 +1024,17 @@ class GlassDashboardCard extends HTMLElement {
         <div class="en-live-block">
           <div class="en-live-val" style="color:${powerColor}">${liveVal}</div>
           <div class="en-live-lbl">${liveLabel}</div>
+          <div class="en-cost-now">${liveCostTxt} · ${priceTxt}</div>
           <div class="spark-wrap" style="margin-top:4px">${this.sparkline(e.p1Power, powerColor)}</div>
         </div>
-        ${hasEnergyConfig ? `<div class="en-divider"></div>
+        <div class="en-divider"></div>
         <div class="en-today-block">
           <div class="en-today-val">${todayKwh > 0 ? todayKwh.toFixed(2) : "--"}<span class="en-unit"> kWh</span></div>
-          <div class="en-today-cost">${todayKwh > 0 ? "€"+todayCost+" today" : this._energy.loading ? "Loading…" : "No data yet"}</div>
-        </div>` : ""}
+          <div class="en-today-cost">${todayKwh > 0 ? "€"+todayCost+" today" : this._energy.loading ? "Loading…" : "Waiting for data"}</div>
+        </div>
       </div>
       ${hasEnergyConfig ? `<div class="en-tabs">${tabs}</div>
-      <div class="en-chart">${buckets.length ? this._energyBars(buckets) : `<div class="en-loading">${this._energy.loading ? "Loading…" : "No data"}</div>`}</div>` : `<div class="en-nodata"><ha-icon icon="mdi:lightning-bolt-outline" style="--mdc-icon-size:13px;opacity:.35"></ha-icon><span>Add energy sources in HA Energy dashboard for usage history</span></div>`}
+      <div class="en-chart">${buckets.length ? this._energyBars(buckets) : `<div class="en-loading">${this._energy.loading ? "Loading…" : "No usage data yet"}</div>`}</div>` : ""}
     </section>`;
   }
 
@@ -1472,7 +1484,7 @@ button{font:inherit;color:inherit;border:0;text-align:inherit;cursor:pointer;bac
 .divider{height:1px;background:rgba(255,255,255,.07);margin:0 10px}
 
 /* Page layout */
-.page{display:none;flex:1;min-height:0;padding:5px 8px 7px;flex-direction:column;overflow:hidden;scrollbar-width:none}
+.page{display:none;flex:1;min-height:0;padding:5px 8px max(18px, env(safe-area-inset-bottom));flex-direction:column;overflow-y:auto;overflow-x:hidden;scrollbar-width:none;-webkit-overflow-scrolling:touch;scroll-padding-bottom:18px}
 .page::-webkit-scrollbar{display:none}
 .page.active{display:flex}
 .page-ov{gap:5px}
@@ -1683,6 +1695,7 @@ button.is-pressed{transform:scale(.93)!important;filter:brightness(1.2)}
 .en-live-block{flex:1;min-width:0}
 .en-live-val{font-size:36px;font-weight:300;letter-spacing:-1px;line-height:1.05;transition:color .3s}
 .en-live-lbl{font-size:10px;color:rgba(255,255,255,.43);text-transform:uppercase;letter-spacing:.6px;margin-top:1px}
+.en-cost-now{font-size:11px;color:rgba(255,255,255,.58);margin-top:2px;font-weight:700}
 .en-divider{width:1px;height:38px;background:rgba(255,255,255,.1);flex-shrink:0}
 .en-today-block{flex:1;min-width:0}
 .en-today-val{font-size:24px;font-weight:300;color:rgba(255,255,255,.94);letter-spacing:-.6px;line-height:1}
