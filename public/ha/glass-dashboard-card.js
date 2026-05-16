@@ -730,14 +730,16 @@ class GlassDashboardCard extends HTMLElement {
     if (p.lastPixels) {
       let diff = 0;
       // Sample every 8th pixel (red channel only) for speed
-      for (let i = 0; i < data.length; i += 32) {
+      const step = 32;
+      for (let i = 0; i < data.length; i += step) {
         diff += Math.abs(data[i] - p.lastPixels[i]);
       }
-      // Normalize: max diff per sampled pixel is 255
-      const score = diff / (data.length / 32 / 255);
+      // Normalize to 0–1: diff / (numSamples * maxDiffPerSample)
+      const numSamples = Math.floor(data.length / step);
+      const score = diff / (numSamples * 255);
 
-      if (score > 0.04) {
-        // Motion detected
+      // score > 0.08 = roughly 8% average channel change across sampled pixels
+      if (score > 0.08) {
         p.lastMotion = Date.now();
         if (p.dimmed) this._wakeScreen();
       }
@@ -1944,13 +1946,13 @@ button.is-pressed{transform:scale(.93)!important;filter:brightness(1.2)}
   animation:pres-drift 30s ease-in-out infinite alternate;
 }
 .presence-time{
-  font-size:96px;font-weight:100;letter-spacing:-4px;
-  color:rgba(255,255,255,.82);line-height:1;
+  font-size:22vw;font-weight:100;letter-spacing:-.02em;
+  color:rgba(255,255,255,.85);line-height:1;
   font-family:-apple-system,BlinkMacSystemFont,"SF Pro Display",system-ui,sans-serif;
 }
 .presence-date{
-  font-size:22px;font-weight:300;
-  color:rgba(255,255,255,.38);margin-top:8px;letter-spacing:.5px;
+  font-size:3.5vw;font-weight:300;
+  color:rgba(255,255,255,.4);margin-top:12px;letter-spacing:.5px;
 }
 @keyframes pres-drift{
   0%  { transform:translate(-18px,-12px); }
