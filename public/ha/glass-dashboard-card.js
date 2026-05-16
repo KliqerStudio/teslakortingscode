@@ -1056,7 +1056,18 @@ class GlassDashboardCard extends HTMLElement {
         map[key].kwh += (entry.change ?? 0);
       });
     }
-    return Object.values(map).sort((a,b) => a.start < b.start ? -1 : 1);
+    return Object.values(map).sort((a,b) => this._bucketTime(a.start) - this._bucketTime(b.start));
+  }
+
+  _bucketTime(value) {
+    if (typeof value === "number") return value;
+    const parsed = Date.parse(value);
+    return Number.isFinite(parsed) ? parsed : 0;
+  }
+
+  _bucketHourKey(value) {
+    const t = this._bucketTime(value);
+    return t ? new Date(t).toISOString().slice(0, 13) : "";
   }
 
   _bucketLabel(dt, period) {
@@ -1080,7 +1091,7 @@ class GlassDashboardCard extends HTMLElement {
       const bh  = Math.max(1.5, (b.kwh / maxV) * chartH);
       const x   = i * step + (step - barW) / 2;
       const y   = chartH - bh;
-      const cur = b.start.slice(0, 13) === nowIso || i === buckets.length - 1;
+      const cur = this._bucketHourKey(b.start) === nowIso || i === buckets.length - 1;
       const fill = cur ? "rgba(251,191,36,.95)" : "rgba(167,139,250,.52)";
       const lbl  = this._bucketLabel(b.start, this._energy.period);
       return `<rect x="${x.toFixed(1)}" y="${y.toFixed(1)}" width="${barW.toFixed(1)}" height="${bh.toFixed(1)}" rx="2" fill="${fill}"/>` +
@@ -1149,7 +1160,7 @@ class GlassDashboardCard extends HTMLElement {
         </div>
         <div class="tc-img-wrap">
           <div class="tc-glow"></div>
-          <img class="tc-car" src="https://teslakortingscode.com/ha/tesla-model-3-side.png" alt="Model 3" draggable="false">
+          <img class="tc-car" src="https://teslakortingscode.com/ha/tesla-model-3-with-toon.png" alt="Model 3 with Toon" draggable="false">
         </div>
       </div>
       <div class="tc-stats">
