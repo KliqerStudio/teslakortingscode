@@ -280,7 +280,12 @@
       cls.includes("view-header") ||
       cls.includes("view-title") ||
       cls.includes("header-title") ||
-      (tag === "h1" && (cls.includes("header") || cls.includes("title") || el.textContent?.trim() === "Home"))
+      (tag === "h1" && (cls.includes("header") || cls.includes("title") || el.textContent?.trim() === "Home")) ||
+      (
+        el.children?.length === 0 &&
+        el.textContent?.trim() === "Home" &&
+        ["div", "span", "h1", "h2"].includes(tag)
+      )
     ) {
       el.style.setProperty("display", "none", "important");
       el.style.setProperty("height", "0", "important");
