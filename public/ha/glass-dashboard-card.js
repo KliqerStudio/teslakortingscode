@@ -23,6 +23,12 @@ class GlassDashboardCard extends HTMLElement {
     this._lastClickSound = 0;
     this._energy = { prefs: null, stats: {}, period: "day", loadedAt: {}, loading: false, loadingPeriods: new Set() };
     this._energyRate = 0.29; // €/kWh — change to match your contract
+    // Presence detection
+    this._presence = {
+      stream: null, video: null, canvas: null, ctx: null,
+      lastPixels: null, lastMotion: Date.now(),
+      dimmed: false, timer: null, started: false,
+    };
     this.entities = {
       mainLights: [
         "light.lounge_light","light.living_room","light.reading_light",
@@ -79,6 +85,7 @@ class GlassDashboardCard extends HTMLElement {
     if (this._noticeTimer) window.clearTimeout(this._noticeTimer);
     this._audioCtx?.close?.();
     this._audioCtx = null;
+    this._stopPresence();
   }
 
   set hass(hass) {
@@ -96,6 +103,7 @@ class GlassDashboardCard extends HTMLElement {
       this._renderDebounce = setTimeout(() => this.render(), 100);
     }
     if (!this._timer) this._timer = window.setInterval(() => this.updateClock(), 10000);
+    if (!this._presence.started) this.startPresenceDetection();
   }
 
   _stateSig() {
@@ -680,15 +688,135 @@ class GlassDashboardCard extends HTMLElement {
     } catch {}
   }
 
+  // ── Presence Detection ────────────────────────────────────────────────────────
+  async startPresenceDetection() {
+    this._presence.started = true;
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: "user", width: 160, height: 120 },
+        audio: false,
+      });
+      this._presence.stream = stream;
+
+      const video = document.createElement("video");
+      video.srcObject = stream;
+      video.playsInline = true;
+      video.muted = true;
+      await video.play();
+      this._presence.video = video;
+
+      const canvas = document.createElement("canvas");
+      canvas.width = 160;
+      canvas.height = 120;
+      this._presence.canvas = canvas;
+      this._presence.ctx = canvas.getContext("2d", { willReadFrequently: true });
+
+      // Sample every 1.5s — low CPU, enough for human presence
+      this._presence.timer = window.setInterval(() => this._checkMotion(), 1500);
+      console.log("[GlassDash] Presence detection active");
+    } catch (e) {
+      console.warn("[GlassDash] Camera unavailable for presence detection:", e.message);
+      // No camera → just never dim. Screen stays on per auto-lock: Never setting.
+    }
+  }
+
+  _checkMotion() {
+    const p = this._presence;
+    if (!p.video || !p.ctx) return;
+
+    p.ctx.drawImage(p.video, 0, 0, 160, 120);
+    const { data } = p.ctx.getImageData(0, 0, 160, 120);
+
+    if (p.lastPixels) {
+      let diff = 0;
+      // Sample every 8th pixel (red channel only) for speed
+      for (let i = 0; i < data.length; i += 32) {
+        diff += Math.abs(data[i] - p.lastPixels[i]);
+      }
+      // Normalize: max diff per sampled pixel is 255
+      const score = diff / (data.length / 32 / 255);
+
+      if (score > 0.04) {
+        // Motion detected
+        p.lastMotion = Date.now();
+        if (p.dimmed) this._wakeScreen();
+      }
+    }
+
+    p.lastPixels = new Uint8Array(data);
+
+    // Check idle timeout — dim after 3 minutes of no motion
+    const idleMinutes = (this._config?.idle_minutes ?? 3);
+    if (!p.dimmed && Date.now() - p.lastMotion > idleMinutes * 60 * 1000) {
+      this._sleepScreen();
+    }
+  }
+
+  _wakeScreen() {
+    const p = this._presence;
+    p.dimmed = false;
+    const overlay = this.shadowRoot.querySelector(".presence-overlay");
+    if (overlay) {
+      overlay.classList.remove("dimmed");
+      overlay.style.pointerEvents = "none";
+    }
+    // Optional: brighten via HA Companion app
+    const notifyEntity = this._config?.idle_notify_entity;
+    if (notifyEntity && this._hass) {
+      this._hass.callService("notify", notifyEntity.replace("notify.", ""), {
+        message: "command_screen_brightness_level",
+        data: { command: "command_screen_brightness_level", level: 255 },
+      }).catch(() => {});
+    }
+  }
+
+  _sleepScreen() {
+    const p = this._presence;
+    p.dimmed = true;
+    const overlay = this.shadowRoot.querySelector(".presence-overlay");
+    if (overlay) {
+      overlay.classList.add("dimmed");
+      overlay.style.pointerEvents = "all";
+      // Sync clock immediately so it's not blank when overlay appears
+      const now = new Date();
+      const pt = overlay.querySelector("#pres-t");
+      const pd = overlay.querySelector("#pres-d");
+      if (pt) pt.textContent = now.toLocaleTimeString([],{hour:"2-digit",minute:"2-digit",timeZone:"Europe/Amsterdam"});
+      if (pd) pd.textContent = now.toLocaleDateString([],{weekday:"short",day:"numeric",month:"long",timeZone:"Europe/Amsterdam"});
+    }
+    // Optional: dim via HA Companion app
+    const notifyEntity = this._config?.idle_notify_entity;
+    if (notifyEntity && this._hass) {
+      this._hass.callService("notify", notifyEntity.replace("notify.", ""), {
+        message: "command_screen_brightness_level",
+        data: { command: "command_screen_brightness_level", level: 10 },
+      }).catch(() => {});
+    }
+  }
+
+  _stopPresence() {
+    const p = this._presence;
+    if (p.timer) { window.clearInterval(p.timer); p.timer = null; }
+    if (p.stream) { p.stream.getTracks().forEach(t => t.stop()); p.stream = null; }
+    p.video = null; p.canvas = null; p.ctx = null; p.started = false;
+  }
+
   updateClock() {
     const ti = this.shadowRoot.getElementById("clk-t");
     const da = this.shadowRoot.getElementById("clk-d");
     const gr = this.shadowRoot.getElementById("greeting");
     if (!ti||!da) return;
     const now = new Date();
-    ti.textContent = now.toLocaleTimeString([],{hour:"2-digit",minute:"2-digit",timeZone:"Europe/Amsterdam"});
-    da.textContent = now.toLocaleDateString([],{weekday:"short",day:"numeric",month:"long",timeZone:"Europe/Amsterdam"});
+    const timeStr = now.toLocaleTimeString([],{hour:"2-digit",minute:"2-digit",timeZone:"Europe/Amsterdam"});
+    const dateStr = now.toLocaleDateString([],{weekday:"short",day:"numeric",month:"long",timeZone:"Europe/Amsterdam"});
+    ti.textContent = timeStr;
+    da.textContent = dateStr;
     if (gr) gr.textContent = this.greeting();
+    // Keep presence screensaver clock in sync
+    const pt = this.shadowRoot.getElementById("pres-t");
+    const pd = this.shadowRoot.getElementById("pres-d");
+    if (pt) pt.textContent = timeStr;
+    if (pd) pd.textContent = dateStr;
   }
   greeting() {
     const parts = new Intl.DateTimeFormat("en-GB", {
@@ -825,7 +953,14 @@ class GlassDashboardCard extends HTMLElement {
   ${this.roomPage("game","Game Room","Office · Gaming",e.gameLights)}
   ${this.toonPage(camSrc)}
   ${this.roomPage("util","Utility","Toilet · Hallway/Door",e.utilityLights)}
-</div></ha-card>`;
+</div>
+<div class="presence-overlay ${this._presence.dimmed ? "dimmed" : ""}" data-action="presence-wake">
+  <div class="presence-clock">
+    <div class="presence-time" id="pres-t"></div>
+    <div class="presence-date" id="pres-d"></div>
+  </div>
+</div>
+</ha-card>`;
 
     this.updateClock();
     this.bindEvents();
@@ -918,6 +1053,16 @@ class GlassDashboardCard extends HTMLElement {
         this.loadEnergy(p);       // fetch data for new period (may be cached)
       })
     );
+
+    // Presence overlay — tap to wake; restore pointer-events after re-render
+    const overlay = this.shadowRoot.querySelector("[data-action='presence-wake']");
+    if (overlay) {
+      overlay.style.pointerEvents = this._presence.dimmed ? "all" : "none";
+      overlay.addEventListener("click", () => {
+        this._presence.lastMotion = Date.now();
+        this._wakeScreen();
+      });
+    }
   }
 
   // ── Component Builders ────────────────────────────────────────────────────────
@@ -1772,6 +1917,38 @@ button.is-pressed{transform:scale(.93)!important;filter:brightness(1.2)}
   .sp-art,.sp-art-empty{width:100%;height:84px}
   .clim-row{grid-template-columns:1fr auto 1fr}
   .clim-row .clim-sep:last-of-type,.clim-row .aq-col{display:none}
+}
+
+/* Presence / sleep overlay */
+.presence-overlay{
+  position:fixed;inset:0;z-index:9999;
+  background:#000;
+  opacity:0;pointer-events:none;
+  transition:opacity 2s ease;
+  display:flex;align-items:center;justify-content:center;
+}
+.presence-overlay.dimmed{
+  opacity:1;pointer-events:all;
+  transition:opacity 1.5s ease;
+}
+.presence-clock{
+  text-align:center;
+  animation:pres-drift 30s ease-in-out infinite alternate;
+}
+.presence-time{
+  font-size:96px;font-weight:100;letter-spacing:-4px;
+  color:rgba(255,255,255,.82);line-height:1;
+  font-family:-apple-system,BlinkMacSystemFont,"SF Pro Display",system-ui,sans-serif;
+}
+.presence-date{
+  font-size:22px;font-weight:300;
+  color:rgba(255,255,255,.38);margin-top:8px;letter-spacing:.5px;
+}
+@keyframes pres-drift{
+  0%  { transform:translate(-18px,-12px); }
+  33% { transform:translate(14px, 18px); }
+  66% { transform:translate(-10px, 8px); }
+  100%{ transform:translate(16px,-14px); }
 }
 `; }
 }
