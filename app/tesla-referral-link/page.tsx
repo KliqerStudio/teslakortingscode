@@ -5,7 +5,7 @@ import { CopyReferralButton } from "@/components/CopyReferralButton";
 import { JsonLd } from "@/components/JsonLd";
 import { ReferralCard } from "@/components/ReferralCard";
 import { SectionHeader } from "@/components/SectionHeader";
-import { absoluteUrl, dealPath, referralCode, siteUrl, termsUrl } from "@/lib/site";
+import { absoluteUrl, dealPath, referralCode, siteUrl } from "@/lib/site";
 
 export const dynamic = "force-static";
 

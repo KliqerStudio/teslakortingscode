@@ -34,7 +34,7 @@ class GlassDashboardCard extends HTMLElement {
         "light.lounge_light","light.living_room","light.reading_light",
         "light.dining_room","light.led_keuken_boven","light.led_keuken_onder",
         "light.led_strip_4","light.govee_tv_left","light.govee_tv_right",
-        "light.rgbic_tv_backlight","light.tv_left","light.tv_right","light.marylin",
+        "light.rgbic_tv_backlight","light.marylin",
       ],
       bedroomLights: ["light.bed","light.kast","light.closet","light.ants_closet","switch.night_light"],
       gameLights: [
@@ -228,7 +228,7 @@ class GlassDashboardCard extends HTMLElement {
     const targets = this.actionable(entities);
     if (!targets.length) return;
     const targetOn = !targets.some(e => this.isOn(e));
-    this.setOptimistic(targets, targetOn ? "on" : "off");
+    this.setOptimistic(targets, targetOn ? "on" : "off", 10000);
     this.render();
     try {
       await this.service("homeassistant", targetOn ? "turn_on" : "turn_off", { entity_id: targets });
@@ -243,9 +243,13 @@ class GlassDashboardCard extends HTMLElement {
       ...this.entities.mainLights,...this.entities.bedroomLights,
       ...this.entities.gameLights,...this.entities.utilityLights,
     ]);
-    this.setOptimistic(targets, "off");
+    this.setOptimistic(targets, "off", 10000);
     this.render();
-    this.service("homeassistant","turn_off",{ entity_id: targets });
+    this.service("homeassistant","turn_off",{ entity_id: targets }).catch(err => {
+      targets.forEach(entity => this._optimistic.delete(entity));
+      this.render();
+      console.warn("[GlassDash] all-off failed:", err);
+    });
   }
   async toggleClimate() {
     const cur = this._hass?.states?.[this.entities.teslaClimate]?.state;
