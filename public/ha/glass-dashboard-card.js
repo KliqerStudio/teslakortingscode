@@ -973,7 +973,7 @@ class GlassDashboardCard extends HTMLElement {
         </div>
         <div class="tc-img-wrap">
           <div class="tc-glow"></div>
-          <img class="tc-car" src="https://teslakortingscode.com/ha/tesla-model-3.png" alt="Model 3" draggable="false">
+          <img class="tc-car" src="https://teslakortingscode.com/ha/tesla-model-3-side.png" alt="Model 3" draggable="false">
         </div>
       </div>
       <div class="tc-stats">
@@ -1370,7 +1370,7 @@ button.is-pressed{transform:scale(.93)!important;filter:brightness(1.2)}
 .tc-sub{font-size:9px;color:rgba(255,255,255,.38);letter-spacing:.8px;text-transform:uppercase;margin-top:1px}
 .tc-img-wrap{width:100%;height:118px;position:relative;background:transparent;display:flex;align-items:center;justify-content:center;overflow:hidden}
 .tc-glow{position:absolute;bottom:0;left:0;right:0;height:50px;background:radial-gradient(ellipse 90% 100% at 50% 100%,rgba(60,90,220,.2),transparent 70%);pointer-events:none}
-.tc-car{width:78%;height:92%;object-fit:contain;object-position:center center;filter:drop-shadow(0 12px 18px rgba(0,0,0,.62));pointer-events:none;user-select:none;position:relative;z-index:1;transform:translateY(5px)}
+.tc-car{width:86%;height:88%;object-fit:contain;object-position:center center;filter:drop-shadow(0 12px 18px rgba(0,0,0,.62));pointer-events:none;user-select:none;position:relative;z-index:1;transform:translateY(7px)}
 .tc-stats{padding:7px 11px 5px}
 .tc-batt-row{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:5px}
 .tc-pct{font-size:34px;font-weight:800;letter-spacing:-2px;line-height:1}
@@ -1546,7 +1546,7 @@ button.is-pressed{transform:scale(.93)!important;filter:brightness(1.2)}
   .ov-main,.g2{grid-template-columns:1fr}
   .rooms5{grid-template-columns:repeat(3,1fr)}
   .tc-img-wrap{height:110px}
-  .tc-car{width:88%}
+  .tc-car{width:92%}
   .wx-forecast{grid-template-columns:repeat(3,1fr)}
   .media-strip{grid-template-columns:1fr}
   .sp2{flex-direction:column}
