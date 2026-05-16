@@ -21,7 +21,7 @@ class GlassDashboardCard extends HTMLElement {
     this._noticeTimer = null;
     this._audioCtx = null;
     this._lastClickSound = 0;
-    this._energy = { prefs: null, stats: {}, period: "day", loadedAt: {}, loading: false };
+    this._energy = { prefs: null, stats: {}, period: "day", loadedAt: {}, loading: false, loadingPeriods: new Set() };
     this._energyRate = 0.29; // €/kWh — change to match your contract
     this.entities = {
       mainLights: [
@@ -412,10 +412,14 @@ class GlassDashboardCard extends HTMLElement {
     finally { this._historyLoading = false; }
   }
 
-  async loadEnergy() {
-    if (this._energy.loading) return;
+  async loadEnergy(requestedPeriod = this._energy.period) {
     if (!this._hass?.callWS) return;
+    const period = requestedPeriod || "day";
+    if (this._energy.loadingPeriods?.has(period)) return;
+    this._energy.loadingPeriods ??= new Set();
+    this._energy.loadingPeriods.add(period);
     this._energy.loading = true;
+    this.render();
     try {
       // Step 1: Discover which entities HA Energy dashboard is configured to track
       if (!this._energy.prefs) {
@@ -444,7 +448,6 @@ class GlassDashboardCard extends HTMLElement {
         return; // Energy not configured in HA; live P1 still renders from entity state/history.
       }
 
-      const period   = this._energy.period;
       const now      = Date.now();
       const cacheTtl = period === "day" ? 300000 : 900000;
       const dayStale = !this._energy.loadedAt["day"] || now - this._energy.loadedAt["day"] > 300000;
@@ -491,7 +494,11 @@ class GlassDashboardCard extends HTMLElement {
       }
       this.render();
     } catch(e) { console.warn("[GlassDash] Energy stats failed:", e); }
-    finally    { this._energy.loading = false; }
+    finally    {
+      this._energy.loadingPeriods?.delete(period);
+      this._energy.loading = (this._energy.loadingPeriods?.size || 0) > 0;
+      this.render();
+    }
   }
 
   // ── Camera (stable refresh, no flicker) ──────────────────────────────────────
@@ -908,7 +915,7 @@ class GlassDashboardCard extends HTMLElement {
         if (p === this._energy.period) return;
         this._energy.period = p;
         this.render();            // show new tab selection immediately
-        this.loadEnergy();        // fetch data for new period (may be cached)
+        this.loadEnergy(p);       // fetch data for new period (may be cached)
       })
     );
   }
@@ -1012,10 +1019,11 @@ class GlassDashboardCard extends HTMLElement {
     const period      = this._energy.period;
     const periodStats = this._energy.stats[period];
     const buckets     = this._buildEnergyBuckets(periodStats, consumptionIds);
+    const periodLoading = this._energy.loadingPeriods?.has(period);
 
     const hasEnergyConfig = consumptionIds.length > 0;
     const tabs = ["day","week","month","year"].map(p =>
-      `<button class="en-tab ${p===period?"active":""}" data-energy-period="${p}">${p.charAt(0).toUpperCase()+p.slice(1)}</button>`
+      `<button class="en-tab ${p===period?"active":""} ${this._energy.loadingPeriods?.has(p) ? "loading" : ""}" data-energy-period="${p}">${p.charAt(0).toUpperCase()+p.slice(1)}</button>`
     ).join("");
 
     return `<section class="gl block en-section">
@@ -1030,11 +1038,11 @@ class GlassDashboardCard extends HTMLElement {
         <div class="en-divider"></div>
         <div class="en-today-block">
           <div class="en-today-val">${todayKwh > 0 ? todayKwh.toFixed(2) : "--"}<span class="en-unit"> kWh</span></div>
-          <div class="en-today-cost">${todayKwh > 0 ? "€"+todayCost+" today" : this._energy.loading ? "Loading…" : "Waiting for data"}</div>
+          <div class="en-today-cost">${todayKwh > 0 ? "€"+todayCost+" today" : this._energy.loadingPeriods?.has("day") ? "Loading…" : "Waiting for data"}</div>
         </div>
       </div>
       ${hasEnergyConfig ? `<div class="en-tabs">${tabs}</div>
-      <div class="en-chart">${buckets.length ? this._energyBars(buckets) : `<div class="en-loading">${this._energy.loading ? "Loading…" : "No usage data yet"}</div>`}</div>` : ""}
+      <div class="en-chart">${buckets.length ? this._energyBars(buckets) : `<div class="en-loading">${periodLoading ? "Loading…" : "No usage data yet"}</div>`}</div>` : ""}
     </section>`;
   }
 
@@ -1705,6 +1713,8 @@ button.is-pressed{transform:scale(.93)!important;filter:brightness(1.2)}
 .en-tab{flex:1;padding:4px 2px;border-radius:8px;font-size:9px;font-weight:700;color:rgba(255,255,255,.4);background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.07)!important;transition:all .15s;text-transform:capitalize;text-align:center;cursor:pointer}
 .en-tab:hover{background:rgba(255,255,255,.09);color:rgba(255,255,255,.65)}
 .en-tab.active{background:rgba(167,139,250,.18);border-color:rgba(167,139,250,.35)!important;color:rgba(200,185,255,.92)}
+.en-tab.loading{position:relative;color:rgba(255,255,255,.72)}
+.en-tab.loading::after{content:"";position:absolute;right:7px;top:50%;width:5px;height:5px;margin-top:-2.5px;border-radius:50%;background:#a78bfa;box-shadow:0 0 8px rgba(167,139,250,.7);animation:sentry-pulse 1.15s ease-in-out infinite}
 .en-chart{width:100%;height:48px;overflow:hidden}
 .en-svg{width:100%;height:48px;display:block}
 .en-loading{height:48px;display:flex;align-items:center;justify-content:center;font-size:11px;color:rgba(255,255,255,.28)}
