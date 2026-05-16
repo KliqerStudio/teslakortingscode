@@ -37,7 +37,7 @@ class GlassDashboardCard extends HTMLElement {
       bedTemp:        "sensor.bedroom_sensor_temperature",
       bedHumidity:    "sensor.bedroom_sensor_humidity",
       bedAir:         "sensor.bedroom_sensor_air_quality",
-      weather:        "weather.forecast_home",
+      weather:        "weather.buienradar",
       teslaClimate:   "climate.model_3_climate",
       teslaBattery:   "sensor.model_3_battery_level",
       teslaRange:     "sensor.model_3_battery_range",
