@@ -142,6 +142,16 @@
     app-toolbar [slot="actionItems"],
     app-toolbar .action-items,
     app-toolbar .toolbar-actions,
+    hui-view-header,
+    hui-view > .header,
+    hui-panel-view > .header,
+    hui-masonry-view > .header,
+    hui-sections-view > .header,
+    hui-view h1.header,
+    hui-view h1.title,
+    .view-header,
+    .view-title,
+    .header-title,
     ha-sidebar,
     home-assistant-sidebar,
     app-drawer,
@@ -155,6 +165,8 @@
       min-height: 0 !important;
       opacity: 0 !important;
       pointer-events: none !important;
+      margin: 0 !important;
+      padding: 0 !important;
     }
 
     app-header-layout {
@@ -242,6 +254,7 @@
     }
 
     if (
+      tag === "hui-view-header" ||
       tag === "app-header" ||
       tag === "app-toolbar" ||
       tag === "app-drawer" ||
@@ -254,6 +267,20 @@
       el.style.setProperty("width", "0", "important");
       el.style.setProperty("min-width", "0", "important");
       el.style.setProperty("max-width", "0", "important");
+    }
+
+    const cls = String(el.className || "");
+    if (
+      cls.includes("view-header") ||
+      cls.includes("view-title") ||
+      cls.includes("header-title") ||
+      (tag === "h1" && (cls.includes("header") || cls.includes("title")))
+    ) {
+      el.style.setProperty("display", "none", "important");
+      el.style.setProperty("height", "0", "important");
+      el.style.setProperty("margin", "0", "important");
+      el.style.setProperty("padding", "0", "important");
+      el.style.setProperty("pointer-events", "none", "important");
     }
 
     if (
