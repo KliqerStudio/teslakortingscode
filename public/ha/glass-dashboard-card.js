@@ -48,17 +48,8 @@ class GlassDashboardCard extends HTMLElement {
       teslaBattery:   "sensor.model_3_battery_level",
       teslaRange:     "sensor.model_3_battery_range",
       teslaLocation:  "device_tracker.model_3_location",
-      teslaDefrost:   "switch.model_3_defrost",
       teslaSentry:    "switch.model_3_sentry_mode",
-      teslaCharge:    "switch.model_3_charge",
-      teslaStatus:    "binary_sensor.model_3_status",
-      teslaCharging:  "sensor.model_3_charging",
       teslaInsideTemp:"sensor.model_3_inside_temperature",
-      teslaOutsideTemp:"sensor.model_3_outside_temperature",
-      teslaLock:      "lock.model_3_lock",
-      teslaChargePort:"cover.model_3_charge_port_door",
-      teslaFrunk:     "cover.model_3_froot",
-      teslaBoot:      "cover.model_3_boot",
       p1Power:        "sensor.p1_meter_power",
       p1Return:       "",
       p1Gas:          "",
@@ -113,8 +104,7 @@ class GlassDashboardCard extends HTMLElement {
       e.livingTemp, e.livingHumidity, e.livingAir,
       e.bedTemp, e.bedHumidity, e.bedAir, e.weather,
       e.teslaClimate, e.teslaBattery, e.teslaRange, e.teslaLocation,
-      e.teslaDefrost, e.teslaSentry, e.teslaCharge, e.teslaStatus, e.teslaCharging,
-      e.teslaInsideTemp, e.teslaOutsideTemp,
+      e.teslaSentry, e.teslaInsideTemp,
       e.spotify, e.spotifySpeaker, e.tv, e.petFeederCamera,
       e.p1Power, e.p1Return, e.p1EnergyToday,
     ];
@@ -873,13 +863,7 @@ class GlassDashboardCard extends HTMLElement {
 
     // Tesla
     this.shadowRoot.querySelector("[data-tesla='climate']")  ?.addEventListener("click", () => this.toggleClimate());
-    this.shadowRoot.querySelector("[data-tesla='defrost']")  ?.addEventListener("click", () => this.toggleEntity(this.entities.teslaDefrost));
     this.shadowRoot.querySelector("[data-tesla='sentry']")   ?.addEventListener("click", () => this.toggleEntity(this.entities.teslaSentry));
-    this.shadowRoot.querySelector("[data-tesla='charge']")   ?.addEventListener("click", () => this.toggleEntity(this.entities.teslaCharge));
-    this.shadowRoot.querySelector("[data-tesla='wake']")     ?.addEventListener("click", async () => {
-      try { await this.service("button","press",{ entity_id:"button.model_3_wake" }); }
-      catch (err) { this.handleTeslaCommandError(err); }
-    });
     this.shadowRoot.querySelector("[data-tesla='temp-up']")  ?.addEventListener("click", () => this.setClimateTemp(0.5));
     this.shadowRoot.querySelector("[data-tesla='temp-down']")?.addEventListener("click", () => this.setClimateTemp(-0.5));
     this.shadowRoot.querySelector("[data-notice-url]")       ?.addEventListener("click", e => window.open(e.currentTarget.dataset.noticeUrl, "_blank", "noopener,noreferrer"));
@@ -1134,10 +1118,6 @@ class GlassDashboardCard extends HTMLElement {
     const battColor = pct > 50 ? "#34d399" : pct > 20 ? "#fbbf24" : "#f87171";
     const clim = this.teslaClimateState(climOn, targetTemp);
     const sentryOn = this.isOn(this.entities.teslaSentry);
-    const defrostOn = this.isOn(this.entities.teslaDefrost);
-    const chargingState = this.st(this.entities.teslaCharging, "disconnected");
-    const chargeOn = this.isOn(this.entities.teslaCharge) || ["starting","charging"].includes(chargingState);
-    const awake = this.isOn(this.entities.teslaStatus);
     return `<section class="gl tc">
       <div class="tc-hero">
         <div class="tc-top">
@@ -1182,10 +1162,7 @@ class GlassDashboardCard extends HTMLElement {
       </div>` : ""}
       <div class="tc-btns">
         ${this.teslaButton("climate", clim.icon,                  clim.label, clim.active, clim.mode)}
-        ${this.teslaButton("defrost","mdi:car-defrost-front",     "Defrost", defrostOn, "defrost")}
         ${this.teslaButton("sentry", "mdi:shield-check-outline",  "Sentry",  sentryOn, "sentry")}
-        ${this.teslaButton("charge", "mdi:lightning-bolt-outline","Charge",  chargeOn, chargeOn ? "charge" : "")}
-        ${this.teslaButton("wake",   awake ? "mdi:access-point" : "mdi:power-cycle", awake ? "Awake" : "Wake", awake, awake ? "awake" : "")}
       </div>
     </section>`;
   }
@@ -1580,32 +1557,27 @@ button.is-pressed{transform:scale(.93)!important;filter:brightness(1.2)}
 .tc-tbtn{width:30px;height:30px;border-radius:50%;background:rgba(255,255,255,.1);border:1px solid rgba(255,255,255,.18)!important;display:flex;align-items:center;justify-content:center;font-size:20px;line-height:1;color:rgba(255,255,255,.82);transition:all .15s;flex-shrink:0}
 .tc-tbtn:hover{background:rgba(255,255,255,.17)}
 .tc-tval{font-size:15px;font-weight:600;color:rgba(255,255,255,.82);min-width:36px;text-align:center}
-.tc-btns{display:grid;grid-template-columns:repeat(5,1fr);gap:4px;padding:6px 9px;border-top:1px solid rgba(255,255,255,.07)}
-.tb{padding:6px 3px;text-align:center;transition:all .18s,transform .08s;border-radius:8px;border:1px solid rgba(255,255,255,.1);background:rgba(255,255,255,.06)}
+.tc-btns{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:7px;padding:7px 10px 9px;border-top:1px solid rgba(255,255,255,.07)}
+.tb{position:relative;display:flex;align-items:center;justify-content:center;gap:8px;min-height:43px;padding:7px 9px;text-align:center;transition:all .18s,transform .08s;border-radius:11px;border:1px solid rgba(255,255,255,.1);background:rgba(255,255,255,.06)}
 .tb:hover{background:rgba(255,255,255,.1)}
 .tb.on{background:rgba(167,139,250,.16);border-color:rgba(167,139,250,.42);box-shadow:0 0 9px rgba(167,139,250,.22)}
 .tb-heating.on{background:rgba(251,146,60,.17);border-color:rgba(251,146,60,.42);box-shadow:0 0 12px rgba(251,146,60,.25)}
 .tb-cooling.on{background:rgba(96,165,250,.17);border-color:rgba(96,165,250,.44);box-shadow:0 0 12px rgba(96,165,250,.24)}
 .tb-climate.on{background:rgba(52,211,153,.15);border-color:rgba(52,211,153,.38);box-shadow:0 0 12px rgba(52,211,153,.22)}
-.tb-defrost.on{background:rgba(125,211,252,.15);border-color:rgba(125,211,252,.38)}
-.tb-charge.on{background:rgba(52,211,153,.15);border-color:rgba(52,211,153,.38)}
 .tb-sentry{position:relative}
 .tb-sentry.on{background:rgba(248,113,113,.14);border-color:rgba(248,113,113,.45);box-shadow:0 0 12px rgba(248,113,113,.25)}
-.tb-sentry.on::after{content:"";position:absolute;top:6px;right:7px;width:7px;height:7px;border-radius:50%;background:#ef4444;box-shadow:0 0 9px rgba(239,68,68,.9);animation:sentry-pulse 1.35s ease-in-out infinite}
-.tb-awake.on{background:rgba(167,139,250,.12);border-color:rgba(167,139,250,.30)}
-.tb ha-icon{display:block;--mdc-icon-size:14px;color:rgba(255,255,255,.5);margin:0 auto 3px}
+.tb-sentry.on::after{content:"";position:absolute;top:8px;right:9px;width:8px;height:8px;border-radius:50%;background:#ef4444;box-shadow:0 0 10px rgba(239,68,68,.95);animation:sentry-pulse 1.35s ease-in-out infinite}
+.tb ha-icon{display:block;--mdc-icon-size:18px;color:rgba(255,255,255,.5);margin:0}
 .tb.on ha-icon{color:#c4b5fd}
 .tb-heating.on ha-icon{color:#fdba74}
 .tb-cooling.on ha-icon{color:#93c5fd}
-.tb-climate.on ha-icon,.tb-charge.on ha-icon{color:#6ee7b7}
-.tb-defrost.on ha-icon{color:#bae6fd}
+.tb-climate.on ha-icon{color:#6ee7b7}
 .tb-sentry.on ha-icon{color:#fca5a5}
-.tb span{font-size:8px;color:rgba(255,255,255,.44);text-transform:uppercase;letter-spacing:.3px;font-weight:700}
+.tb span{font-size:9px;color:rgba(255,255,255,.5);text-transform:uppercase;letter-spacing:.42px;font-weight:800}
 .tb.on span{color:rgba(200,185,255,.82)}
 .tb-heating.on span{color:#fed7aa}
 .tb-cooling.on span{color:#bfdbfe}
-.tb-climate.on span,.tb-charge.on span{color:#a7f3d0}
-.tb-defrost.on span{color:#e0f2fe}
+.tb-climate.on span{color:#a7f3d0}
 .tb-sentry.on span{color:#fecaca}
 @keyframes sentry-pulse{0%,100%{opacity:1;transform:scale(1)}50%{opacity:.45;transform:scale(.72)}}
 

@@ -130,8 +130,33 @@
   }
 
   const kioskCss = `
+    :host,
+    html,
+    body {
+      --header-height: 0px !important;
+      --toolbar-height: 0px !important;
+      --app-header-height: 0px !important;
+      --mdc-top-app-bar-height: 0px !important;
+      --mdc-top-app-bar-width: 100% !important;
+      --safe-area-inset-top: 0px !important;
+      --safe-area-content-inset-top: 0px !important;
+    }
+
     app-header,
     app-toolbar,
+    ha-app-layout app-header,
+    ha-app-layout app-toolbar,
+    ha-top-app-bar,
+    ha-mdc-top-app-bar,
+    mdc-top-app-bar,
+    mdc-top-app-bar-fixed,
+    mwc-top-app-bar,
+    mwc-top-app-bar-fixed,
+    .mdc-top-app-bar,
+    .top-app-bar,
+    .main-title,
+    .toolbar,
+    [role="banner"],
     app-header-layout > app-header,
     app-header-layout app-toolbar,
     ha-menu-button,
@@ -177,6 +202,8 @@
 
     app-header-layout {
       padding-top: 0 !important;
+      margin-top: 0 !important;
+      --app-header-height: 0px !important;
     }
 
     app-drawer-layout {
@@ -203,11 +230,29 @@
     #content,
     .content,
     partial-panel-resolver,
-    ha-panel-lovelace {
+    ha-panel-lovelace,
+    ha-app-layout,
+    hui-root,
+    hui-view,
+    hui-panel-view,
+    hui-masonry-view,
+    hui-sections-view {
+      padding-top: 0 !important;
+      margin-top: 0 !important;
       margin-left: 0 !important;
+      top: 0 !important;
       left: 0 !important;
       width: 100% !important;
       max-width: none !important;
+    }
+
+    #view,
+    .view,
+    .panel,
+    .lovelace {
+      padding-top: 0 !important;
+      margin-top: 0 !important;
+      top: 0 !important;
     }
   `;
 
@@ -263,6 +308,12 @@
       tag === "hui-view-header" ||
       tag === "app-header" ||
       tag === "app-toolbar" ||
+      tag === "ha-top-app-bar" ||
+      tag === "ha-mdc-top-app-bar" ||
+      tag === "mdc-top-app-bar" ||
+      tag === "mdc-top-app-bar-fixed" ||
+      tag === "mwc-top-app-bar" ||
+      tag === "mwc-top-app-bar-fixed" ||
       tag === "app-drawer" ||
       tag === "wa-drawer" ||
       tag === "ha-sidebar" ||
@@ -270,9 +321,14 @@
       el.hasAttribute("drawer")
     ) {
       el.style.setProperty("display", "none", "important");
+      el.style.setProperty("height", "0", "important");
+      el.style.setProperty("min-height", "0", "important");
+      el.style.setProperty("max-height", "0", "important");
       el.style.setProperty("width", "0", "important");
       el.style.setProperty("min-width", "0", "important");
       el.style.setProperty("max-width", "0", "important");
+      el.style.setProperty("opacity", "0", "important");
+      el.style.setProperty("pointer-events", "none", "important");
     }
 
     const cls = String(el.className || "");
@@ -306,8 +362,12 @@
       tag === "home-assistant-main" ||
       tag === "partial-panel-resolver" ||
       tag === "ha-panel-lovelace" ||
+      tag === "ha-app-layout" ||
       tag === "hui-root" ||
-      tag === "hui-view"
+      tag === "hui-view" ||
+      tag === "hui-panel-view" ||
+      tag === "hui-masonry-view" ||
+      tag === "hui-sections-view"
     ) {
       if (tag === "home-assistant-main") {
         el.setAttribute("modal", "");
@@ -321,6 +381,9 @@
           el.requestUpdate?.();
         }
       }
+      el.style.setProperty("padding-top", "0", "important");
+      el.style.setProperty("margin-top", "0", "important");
+      el.style.setProperty("top", "0", "important");
       el.style.setProperty("margin-left", "0", "important");
       el.style.setProperty("left", "0", "important");
       el.style.setProperty("width", "100%", "important");
