@@ -5,6 +5,28 @@
 (function () {
   const STYLE_ID = "kliqer-glass-dashboard-style";
   const KIOSK_STYLE_ID = "kliqer-tablet-kiosk-style";
+  const STATUS_BAR_COLOR = "#060818";
+
+  function upsertMeta(name, content) {
+    let meta = document.head?.querySelector(`meta[name="${name}"]`);
+    if (!meta) {
+      meta = document.createElement("meta");
+      meta.name = name;
+      document.head.appendChild(meta);
+    }
+    meta.content = content;
+  }
+
+  function setStatusBarColor() {
+    if (!document.head) return;
+    upsertMeta("theme-color", STATUS_BAR_COLOR);
+    upsertMeta("msapplication-navbutton-color", STATUS_BAR_COLOR);
+    upsertMeta("apple-mobile-web-app-capable", "yes");
+    upsertMeta("mobile-web-app-capable", "yes");
+    upsertMeta("apple-mobile-web-app-status-bar-style", "black-translucent");
+    document.documentElement.style.setProperty("background-color", STATUS_BAR_COLOR, "important");
+    document.body?.style.setProperty("background-color", STATUS_BAR_COLOR, "important");
+  }
 
   const css = `
     :root,
@@ -413,8 +435,15 @@
     visitShadowRoots(document);
   }
 
-  if (document.head) inject();
-  else document.addEventListener("DOMContentLoaded", inject);
+  if (document.head) {
+    setStatusBarColor();
+    inject();
+  } else {
+    document.addEventListener("DOMContentLoaded", () => {
+      setStatusBarColor();
+      inject();
+    });
+  }
 
   if (document.readyState === "loading") {
     document.addEventListener("DOMContentLoaded", forceKioskLayout);
@@ -433,6 +462,7 @@
   }, 500);
 
   window.addEventListener("location-changed", () => {
+    setStatusBarColor();
     inject();
     forceKioskLayout();
   });
