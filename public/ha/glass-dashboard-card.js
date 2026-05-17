@@ -692,19 +692,36 @@ class GlassDashboardCard extends HTMLElement {
   // ── Presence Detection ────────────────────────────────────────────────────────
   async startPresenceDetection() {
     this._presence.started = true;
+    if (!navigator.mediaDevices?.getUserMedia) {
+      console.warn("[GlassDash] getUserMedia not available");
+      return;
+    }
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: "user", width: 160, height: 120 },
+        video: { facingMode: "user", width: { ideal: 160 }, height: { ideal: 120 } },
         audio: false,
       });
       this._presence.stream = stream;
 
+      // Video MUST be in the Shadow DOM — iOS won't decode frames for off-DOM video
       const video = document.createElement("video");
       video.srcObject = stream;
+      video.setAttribute("playsinline", "");
       video.playsInline = true;
       video.muted = true;
-      await video.play();
+      video.autoplay = true;
+      video.style.cssText = "position:fixed;width:1px;height:1px;opacity:0.01;top:0;left:0;pointer-events:none;z-index:-1";
+      this.shadowRoot.appendChild(video);
       this._presence.video = video;
+
+      // Wait for metadata + first frame
+      await new Promise((res, rej) => {
+        video.onloadedmetadata = res;
+        video.onerror = rej;
+        setTimeout(res, 4000); // fallback
+      });
+      await video.play().catch(() => {});
+      await new Promise(res => setTimeout(res, 800)); // let auto-exposure settle
 
       const canvas = document.createElement("canvas");
       canvas.width = 160;
@@ -712,12 +729,10 @@ class GlassDashboardCard extends HTMLElement {
       this._presence.canvas = canvas;
       this._presence.ctx = canvas.getContext("2d", { willReadFrequently: true });
 
-      // Sample every 1.5s — low CPU, enough for human presence
       this._presence.timer = window.setInterval(() => this._checkMotion(), 1500);
-      console.log("[GlassDash] Presence detection active");
+      console.log("[GlassDash] Presence detection active — video:", video.videoWidth, "x", video.videoHeight);
     } catch (e) {
-      console.warn("[GlassDash] Camera unavailable for presence detection:", e.message);
-      // No camera → just never dim. Screen stays on per auto-lock: Never setting.
+      console.warn("[GlassDash] Camera unavailable:", e.name, e.message);
     }
   }
 
@@ -725,8 +740,19 @@ class GlassDashboardCard extends HTMLElement {
     const p = this._presence;
     if (!p.video || !p.ctx) return;
 
+    // iOS won't decode frames if video falls out of the DOM — re-attach if needed
+    if (!p.video.parentNode) {
+      p.video.style.cssText = "position:fixed;width:1px;height:1px;opacity:0.01;top:0;left:0;pointer-events:none;z-index:-1";
+      this.shadowRoot.appendChild(p.video);
+    }
+
+    if (p.video.readyState < 2 || p.video.videoWidth === 0) return; // not ready yet
+
     p.ctx.drawImage(p.video, 0, 0, 160, 120);
-    const { data } = p.ctx.getImageData(0, 0, 160, 120);
+    let imageData;
+    try { imageData = p.ctx.getImageData(0, 0, 160, 120); }
+    catch(e) { console.warn("[GlassDash] getImageData blocked:", e.message); return; }
+    const { data } = imageData;
 
     if (p.lastPixels) {
       let diff = 0;
@@ -801,6 +827,7 @@ class GlassDashboardCard extends HTMLElement {
     const p = this._presence;
     if (p.timer) { window.clearInterval(p.timer); p.timer = null; }
     if (p.stream) { p.stream.getTracks().forEach(t => t.stop()); p.stream = null; }
+    if (p.video?.parentNode) p.video.parentNode.removeChild(p.video);
     p.video = null; p.canvas = null; p.ctx = null; p.started = false;
   }
 
@@ -967,6 +994,12 @@ class GlassDashboardCard extends HTMLElement {
   </div>
 </div>
 </ha-card>`;
+
+    // Re-attach presence video — innerHTML wipe removes it from the shadow DOM
+    if (this._presence.video) {
+      this._presence.video.style.cssText = "position:fixed;width:1px;height:1px;opacity:0.01;top:0;left:0;pointer-events:none;z-index:-1";
+      this.shadowRoot.appendChild(this._presence.video);
+    }
 
     this.updateClock();
     this.bindEvents();
