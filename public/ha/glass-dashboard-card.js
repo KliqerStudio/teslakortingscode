@@ -1169,19 +1169,22 @@ class GlassDashboardCard extends HTMLElement {
     const powerW    = Number(rawPower);
     const returnW   = Number(rawReturn);
     const isLive    = Number.isFinite(powerW);
-    const returning = Number.isFinite(returnW) && returnW > 0;
+    const returning = (Number.isFinite(returnW) && returnW > 0) || (isLive && powerW < 0);
+    const displayW  = returning
+      ? Math.abs(Number.isFinite(returnW) && returnW > 0 ? returnW : powerW)
+      : powerW;
     const powerColor = returning      ? "#34d399"
-      : isLive && powerW < 500  ? "#34d399"
-      : isLive && powerW < 2000 ? "#fbbf24"
+      : isLive && displayW < 500  ? "#34d399"
+      : isLive && displayW < 2000 ? "#fbbf24"
       : "#f87171";
-    const liveLabel = returning ? "Solar return" : "Live grid";
+    const liveLabel = returning ? "Grid return" : "Live grid";
     const liveVal   = isLive
-      ? (powerW >= 1000 ? (powerW/1000).toFixed(2)+" kW" : Math.round(powerW)+" W")
+      ? (displayW >= 1000 ? (displayW/1000).toFixed(2)+" kW" : Math.round(displayW)+" W")
       : "--";
     const priceNowRaw = Number(this.st(e.vattenfallElectricityPrice, NaN));
     const priceNow    = Number.isFinite(priceNowRaw) && priceNowRaw > 0 ? priceNowRaw : this._energyRate;
-    const liveCost    = isLive ? Math.max(0, (powerW / 1000) * priceNow) : NaN;
-    const liveCostTxt = Number.isFinite(liveCost) ? `€${liveCost.toFixed(2)}/h` : "€--/h";
+    const liveCost    = isLive && !returning ? Math.max(0, (displayW / 1000) * priceNow) : NaN;
+    const liveCostTxt = returning ? "No import cost" : Number.isFinite(liveCost) ? `€${liveCost.toFixed(2)}/h` : "€--/h";
     const priceTxt    = Number.isFinite(priceNow) ? `€${priceNow.toFixed(2)}/kWh` : "€--/kWh";
 
     // Today kWh + cost from HA Energy stats
@@ -1191,11 +1194,11 @@ class GlassDashboardCard extends HTMLElement {
     let todayKwh = 0, todayCostStat = 0, hasCostStat = false;
     if (dayStats?.data) {
       for (const id of consumptionIds) {
-        (dayStats.data[id] || []).forEach(b => { todayKwh += (b.change ?? 0); });
+        (dayStats.data[id] || []).forEach(b => { todayKwh += this._cleanEnergyChange(b.change, dayStats.statPeriod); });
       }
       for (const id of costIds) {
         const arr = dayStats.data[id] || [];
-        arr.forEach(b => { todayCostStat += (b.change ?? 0); });
+        arr.forEach(b => { todayCostStat += this._cleanCostChange(b.change); });
         if (arr.length) hasCostStat = true;
       }
     }
@@ -1239,16 +1242,31 @@ class GlassDashboardCard extends HTMLElement {
     const map = {};
     for (const id of consumptionIds) {
       (periodStats.data[id] || []).forEach(entry => {
-        const key = entry.start;
-        if (!map[key]) map[key] = { start: entry.start, kwh: 0 };
-        map[key].kwh += (entry.change ?? 0);
+        const key = this._bucketTime(entry.start);
+        const kwh = this._cleanEnergyChange(entry.change, periodStats.statPeriod);
+        if (!key || kwh <= 0) return;
+        if (!map[key]) map[key] = { start: key, kwh: 0 };
+        map[key].kwh += kwh;
       });
     }
     return Object.values(map).sort((a,b) => this._bucketTime(a.start) - this._bucketTime(b.start));
   }
 
+  _cleanEnergyChange(value, statPeriod = "hour") {
+    const num = Number(value);
+    if (!Number.isFinite(num) || num <= 0) return 0;
+    const caps = { hour: 80, day: 300, month: 8000 };
+    const cap = caps[statPeriod] || 300;
+    return num <= cap ? num : 0;
+  }
+
+  _cleanCostChange(value) {
+    const num = Number(value);
+    return Number.isFinite(num) && num > 0 && num < 1000 ? num : 0;
+  }
+
   _bucketTime(value) {
-    if (typeof value === "number") return value;
+    if (typeof value === "number") return value < 1000000000000 ? value * 1000 : value;
     const parsed = Date.parse(value);
     return Number.isFinite(parsed) ? parsed : 0;
   }
@@ -1259,7 +1277,7 @@ class GlassDashboardCard extends HTMLElement {
   }
 
   _bucketLabel(dt, period) {
-    const d = new Date(dt);
+    const d = new Date(this._bucketTime(dt));
     const h = d.getHours();
     if (period === "day")   return h % 6 === 0 ? d.toLocaleTimeString([], { hour: "2-digit", hour12: false }).replace(":00", "") : "";
     if (period === "week")  return d.toLocaleDateString([], { weekday: "short" });
@@ -1269,23 +1287,38 @@ class GlassDashboardCard extends HTMLElement {
 
   _energyBars(buckets) {
     if (!buckets.length) return "";
-    const maxV = Math.max(...buckets.map(b => b.kwh), 0.001);
-    const W = 280, H = 64, labelH = 14, chartH = H - labelH;
+    const maxV = this._robustEnergyMax(buckets.map(b => b.kwh));
+    const W = 280, H = 50;
     const n = buckets.length;
     const step = W / n;
     const barW = Math.max(1.5, step * 0.72);
     const nowIso = new Date().toISOString().slice(0, 13);
     const bars = buckets.map((b, i) => {
-      const bh  = Math.max(1.5, (b.kwh / maxV) * chartH);
+      const bh  = Math.max(1.5, (Math.min(b.kwh, maxV) / maxV) * H);
       const x   = i * step + (step - barW) / 2;
-      const y   = chartH - bh;
+      const y   = H - bh;
       const cur = this._bucketHourKey(b.start) === nowIso || i === buckets.length - 1;
       const fill = cur ? "rgba(251,191,36,.95)" : "rgba(167,139,250,.52)";
-      const lbl  = this._bucketLabel(b.start, this._energy.period);
+      const outlier = b.kwh > maxV;
       return `<rect x="${x.toFixed(1)}" y="${y.toFixed(1)}" width="${barW.toFixed(1)}" height="${bh.toFixed(1)}" rx="2" fill="${fill}"/>` +
-        (lbl ? `<text class="en-axis-label" x="${(x+barW/2).toFixed(1)}" y="${H-2}" text-anchor="middle">${lbl}</text>` : "");
+        (outlier ? `<circle cx="${(x+barW/2).toFixed(1)}" cy="3" r="1.6" fill="rgba(251,191,36,.95)"/>` : "");
     }).join("");
-    return `<svg class="en-svg" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none">${bars}</svg>`;
+    const labels = buckets.map(b => `<span>${this._bucketLabel(b.start, this._energy.period)}</span>`).join("");
+    return `<div class="en-bar-stack"><svg class="en-svg" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none">${bars}</svg><div class="en-axis">${labels}</div></div>`;
+  }
+
+  _robustEnergyMax(values) {
+    const clean = values.filter(v => Number.isFinite(v) && v > 0).sort((a,b) => a-b);
+    if (!clean.length) return 0.001;
+    if (clean.length < 5) return Math.max(...clean, 0.001);
+    const q = p => clean[Math.min(clean.length - 1, Math.floor((clean.length - 1) * p))];
+    const iqr = Math.max(q(.75) - q(.25), 0);
+    const fence = iqr > 0 ? q(.75) + 1.5 * iqr : q(.95);
+    let maxNormal = 0;
+    for (const value of clean) {
+      if (value <= fence) maxNormal = value;
+    }
+    return Math.max(maxNormal || q(.95), 0.001);
   }
 
   teslaClimateState(climOn, targetTemp) {
@@ -1348,7 +1381,7 @@ class GlassDashboardCard extends HTMLElement {
         </div>
         <div class="tc-img-wrap">
           <div class="tc-glow"></div>
-          <img class="tc-car" src="https://teslakortingscode.com/ha/tesla-model-3-with-toon.png" alt="Model 3 with Toon" draggable="false">
+          <img class="tc-car" src="https://teslakortingscode.com/ha/tesla-model-3-with-toon-final.png" alt="Model 3 with Toon" draggable="false">
         </div>
       </div>
       <div class="tc-stats">
@@ -1915,8 +1948,10 @@ button.is-pressed{transform:scale(.93)!important;filter:brightness(1.2)}
 .en-tab.loading{position:relative;color:rgba(255,255,255,.72)}
 .en-tab.loading::after{content:"";position:absolute;right:7px;top:50%;width:5px;height:5px;margin-top:-2.5px;border-radius:50%;background:#a78bfa;box-shadow:0 0 8px rgba(167,139,250,.7);animation:sentry-pulse 1.15s ease-in-out infinite}
 .en-chart{width:100%;height:48px;overflow:hidden}
-.en-svg{width:100%;height:48px;display:block}
-.en-axis-label{font:700 9px -apple-system,BlinkMacSystemFont,"SF Pro Display",system-ui,sans-serif;fill:rgba(255,255,255,.52);letter-spacing:.2px}
+.en-bar-stack{height:48px;display:flex;flex-direction:column;gap:3px}
+.en-svg{width:100%;height:34px;display:block}
+.en-axis{display:flex;width:100%;height:11px;align-items:flex-start;overflow:hidden}
+.en-axis span{flex:1;min-width:0;text-align:center;font-size:9px;line-height:1;color:rgba(255,255,255,.52);font-weight:700;letter-spacing:0;white-space:nowrap}
 .en-loading{height:48px;display:flex;align-items:center;justify-content:center;font-size:11px;color:rgba(255,255,255,.28)}
 
 /* Climate detail */
