@@ -1782,7 +1782,7 @@ button.is-pressed{transform:scale(.93)!important;filter:brightness(1.2)}
 .tc-sub{font-size:11px;color:rgba(255,255,255,.44);letter-spacing:.8px;text-transform:uppercase;margin-top:0}
 .tc-img-wrap{width:100%;height:120px;position:relative;background:transparent;display:flex;align-items:center;justify-content:center;overflow:hidden}
 .tc-glow{position:absolute;bottom:0;left:0;right:0;height:50px;background:radial-gradient(ellipse 90% 100% at 50% 100%,rgba(60,90,220,.2),transparent 70%);pointer-events:none}
-.tc-car{width:98%;height:100%;object-fit:contain;object-position:center top;filter:drop-shadow(0 13px 19px rgba(0,0,0,.64));pointer-events:none;user-select:none;position:relative;z-index:1;transform:translateY(-10px)}
+.tc-car{width:98%;height:100%;object-fit:contain;object-position:center center;filter:drop-shadow(0 13px 19px rgba(0,0,0,.64));pointer-events:none;user-select:none;position:relative;z-index:1;transform:translateY(0)}
 .tc-stats{padding:7px 11px 5px}
 .tc-batt-row{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:5px}
 .tc-pct{font-size:40px;font-weight:800;letter-spacing:-2px;line-height:1}
