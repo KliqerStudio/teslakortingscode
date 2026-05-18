@@ -57,6 +57,12 @@ class GlassDashboardCard extends HTMLElement {
       teslaLocation:  "device_tracker.model_3_location",
       teslaSentry:    "switch.model_3_sentry_mode",
       teslaInsideTemp:"sensor.model_3_inside_temperature",
+      teslaChargeCable:"binary_sensor.model_3_charge_cable",
+      teslaChargeState:"sensor.model_3_charging",
+      teslaChargeRate:"sensor.model_3_charge_rate",
+      teslaChargePower:"sensor.model_3_charger_power",
+      teslaChargeTime:"sensor.model_3_time_to_full_charge",
+      teslaChargeSwitch:"switch.model_3_charge",
       p1Power:        "sensor.p1_meter_power",
       p1Return:       "",
       p1Gas:          "",
@@ -120,6 +126,8 @@ class GlassDashboardCard extends HTMLElement {
       e.bedTemp, e.bedHumidity, e.bedAir, e.bedPm25, e.weather,
       e.teslaClimate, e.teslaBattery, e.teslaRange, e.teslaLocation,
       e.teslaSentry, e.teslaInsideTemp,
+      e.teslaChargeCable, e.teslaChargeState, e.teslaChargeRate,
+      e.teslaChargePower, e.teslaChargeTime, e.teslaChargeSwitch,
       e.spotify, e.spotifySpeaker, e.tv, e.petFeederCamera,
       e.p1Power, e.p1Return, e.p1EnergyToday,
       e.vattenfallElectricityPrice, e.vattenfallGasPrice,
@@ -288,7 +296,11 @@ class GlassDashboardCard extends HTMLElement {
     this.setOptimistic([this.entities.teslaClimate], targetOn ? "heat_cool" : "off");
     this.render();
     try {
-      await this.service("climate", targetOn ? "turn_on" : "turn_off", { entity_id: this.entities.teslaClimate });
+      await this.service("climate", "set_hvac_mode", {
+        entity_id: this.entities.teslaClimate,
+        hvac_mode: targetOn ? "heat_cool" : "off",
+      });
+      this.reconcileSoon([this.entities.teslaClimate], 1300);
     } catch (err) {
       this._optimistic.delete(this.entities.teslaClimate);
       this.handleTeslaCommandError(err);
@@ -1066,6 +1078,7 @@ class GlassDashboardCard extends HTMLElement {
     const teslaPlace  = this.niceState(e.teslaLocation,"Away");
     const climOn      = this.isOn(e.teslaClimate);
     const targetTemp  = this.attr(e.teslaClimate,"temperature",22);
+    const teslaCharge = this.teslaChargeInfo();
 
     const weatherState    = this.st(e.weather,"clear-night");
     const weatherTemp     = this.attr(e.weather,"temperature","--");
@@ -1158,7 +1171,7 @@ class GlassDashboardCard extends HTMLElement {
 
       <!-- RIGHT: Tesla + Spotify -->
       <div class="col">
-        ${this.teslaCard(batteryRaw,range,teslaPlace,climOn,targetTemp)}
+        ${this.teslaCard(batteryRaw,range,teslaPlace,climOn,targetTemp,teslaCharge)}
         ${this.spotifySection(spotifyPic,spotifyTitle,spotifyArtist,spotifyAlbum,spotifyActive,spotifyPlaying,curPos,durSec,spProg,volPct)}
         ${this.pulseSection()}
       </div>
@@ -1547,7 +1560,7 @@ class GlassDashboardCard extends HTMLElement {
     if (!climOn) {
       return {
         mode: "off",
-        label: "AC",
+        label: "Climate",
         icon: "mdi:fan",
         detail: `Off · ${targetTemp}°C`,
         rowLabel: "Climate",
@@ -1588,11 +1601,53 @@ class GlassDashboardCard extends HTMLElement {
     };
   }
 
-  teslaCard(pct, range, place, climOn, targetTemp) {
+  teslaChargeInfo() {
+    const e = this.entities;
+    const state = String(this.st(e.teslaChargeState, "unknown")).toLowerCase();
+    const cable = this.isOn(e.teslaChargeCable);
+    const chargeSwitch = this.isOn(e.teslaChargeSwitch);
+    const rateNum = Number(this.st(e.teslaChargeRate, NaN));
+    const powerNum = Number(this.st(e.teslaChargePower, NaN));
+    const active = state === "charging" || (Number.isFinite(rateNum) && rateNum > 0) || (Number.isFinite(powerNum) && powerNum > 0);
+    const plugged = cable || ["starting","charging","stopped","complete","no_power"].includes(state);
+    const stateLabel = active ? "Charging"
+      : state === "no_power" ? "Plugged · no power"
+      : state === "stopped" || (plugged && !chargeSwitch) ? "Plugged · paused"
+      : state === "complete" ? "Charge complete"
+      : state === "starting" ? "Starting"
+      : plugged ? "Plugged in" : "Not plugged in";
+    const rate = Number.isFinite(rateNum) ? `${Math.round(rateNum)} km/h` : "-- km/h";
+    const power = Number.isFinite(powerNum) ? `${powerNum.toFixed(powerNum >= 10 ? 0 : 1)} kW` : "-- kW";
+    return {
+      active,
+      plugged,
+      state,
+      stateLabel,
+      rate,
+      power,
+      time: this.formatChargeTime(e.teslaChargeTime),
+    };
+  }
+
+  formatChargeTime(entity) {
+    const raw = this.st(entity, "");
+    if (!raw || raw === "unavailable" || raw === "unknown" || raw === "--") return "--";
+    const ts = Date.parse(raw);
+    if (!Number.isFinite(ts)) return String(raw);
+    const mins = Math.max(0, Math.round((ts - Date.now()) / 60000));
+    if (mins <= 0) return "Now";
+    const h = Math.floor(mins / 60);
+    const m = mins % 60;
+    const at = new Date(ts).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+    return h ? `${h}h ${m}m · ${at}` : `${m}m · ${at}`;
+  }
+
+  teslaCard(pct, range, place, climOn, targetTemp, charge) {
     const battColor = pct > 50 ? "#34d399" : pct > 20 ? "#fbbf24" : "#f87171";
     const clim = this.teslaClimateState(climOn, targetTemp);
     const sentryOn = this.isOn(this.entities.teslaSentry);
-    return `<section class="gl tc">
+    const chargeClass = charge?.active ? "charging" : charge?.plugged ? "plugged" : "";
+    return `<section class="gl tc ${chargeClass}">
       <div class="tc-hero">
         <div class="tc-top">
           <div>
@@ -1612,6 +1667,20 @@ class GlassDashboardCard extends HTMLElement {
           <div class="tc-range">${range}</div>
         </div>
         <div class="tc-bar"><div class="tc-fill" style="width:${pct}%;background:${battColor}"></div></div>
+        <div class="tc-charge ${chargeClass}">
+          <div class="tc-charge-head">
+            <div class="tc-charge-title">
+              <ha-icon icon="${charge?.active ? "mdi:lightning-bolt" : charge?.plugged ? "mdi:power-plug" : "mdi:power-plug-off"}"></ha-icon>
+              <span>${charge?.stateLabel || "Charge unknown"}</span>
+            </div>
+            <div class="tc-charge-time">${charge?.time || "--"}</div>
+          </div>
+          <div class="tc-charge-grid">
+            <div><b>${charge?.rate || "-- km/h"}</b><span>rate</span></div>
+            <div><b>${charge?.power || "-- kW"}</b><span>power</span></div>
+          </div>
+          <div class="tc-charge-track"><span></span><span></span><span></span></div>
+        </div>
         <div class="tc-clim-row">
           <div class="tc-clim-left">
             <ha-icon class="tc-clim-icon ${clim.mode}" icon="${clim.icon}"></ha-icon>
@@ -2153,6 +2222,8 @@ button.is-pressed{transform:scale(.93)!important;filter:brightness(1.2)}
 .tc-img-wrap{width:100%;height:120px;position:relative;background:transparent;display:flex;align-items:center;justify-content:center;overflow:hidden}
 .tc-glow{position:absolute;bottom:0;left:0;right:0;height:50px;background:radial-gradient(ellipse 90% 100% at 50% 100%,rgba(60,90,220,.2),transparent 70%);pointer-events:none}
 .tc-car{width:98%;height:100%;object-fit:contain;object-position:center center;filter:drop-shadow(0 13px 19px rgba(0,0,0,.64));pointer-events:none;user-select:none;position:relative;z-index:1;transform:translateY(0)}
+.tc.charging .tc-glow{background:radial-gradient(ellipse 90% 100% at 50% 100%,rgba(52,211,153,.30),transparent 70%);animation:charge-glow 1.7s ease-in-out infinite}
+.tc.charging .tc-car{animation:charge-car 2.3s ease-in-out infinite}
 .tc-stats{padding:7px 11px 5px}
 .tc-batt-row{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:5px}
 .tc-pct{font-size:40px;font-weight:800;letter-spacing:-2px;line-height:1}
@@ -2160,6 +2231,27 @@ button.is-pressed{transform:scale(.93)!important;filter:brightness(1.2)}
 .tc-range{font-size:18px;font-weight:700;color:rgba(255,255,255,.65)}
 .tc-bar{height:3px;background:rgba(255,255,255,.12);border-radius:2px;margin-bottom:7px;overflow:hidden}
 .tc-fill{height:100%;border-radius:2px;transition:width .4s}
+.tc.charging .tc-fill{position:relative;overflow:hidden}
+.tc.charging .tc-fill::after{content:"";position:absolute;inset:0;background:linear-gradient(90deg,transparent,rgba(255,255,255,.55),transparent);animation:charge-sweep 1.25s linear infinite}
+.tc-charge{margin:0 0 7px;padding:7px 8px;border-radius:10px;background:rgba(255,255,255,.045);border:1px solid rgba(255,255,255,.075);overflow:hidden;position:relative}
+.tc-charge.plugged{background:rgba(96,165,250,.07);border-color:rgba(96,165,250,.16)}
+.tc-charge.charging{background:rgba(52,211,153,.075);border-color:rgba(52,211,153,.22)}
+.tc-charge-head{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:6px}
+.tc-charge-title{display:flex;align-items:center;gap:6px;min-width:0;color:rgba(255,255,255,.78);font-size:11px;font-weight:800}
+.tc-charge-title ha-icon{--mdc-icon-size:15px;color:rgba(255,255,255,.55);flex-shrink:0}
+.tc-charge.charging .tc-charge-title ha-icon{color:#34d399;filter:drop-shadow(0 0 8px rgba(52,211,153,.65))}
+.tc-charge.plugged .tc-charge-title ha-icon{color:#60a5fa}
+.tc-charge-title span{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.tc-charge-time{font-size:10px;color:rgba(255,255,255,.48);font-weight:700;white-space:nowrap}
+.tc-charge-grid{display:grid;grid-template-columns:1fr 1fr;gap:5px}
+.tc-charge-grid div{min-width:0;border-radius:8px;background:rgba(255,255,255,.045);padding:5px 7px}
+.tc-charge-grid b{display:block;font-size:15px;color:rgba(255,255,255,.9);line-height:1.05;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.tc-charge-grid span{display:block;margin-top:2px;font-size:8px;letter-spacing:.45px;text-transform:uppercase;color:rgba(255,255,255,.38)}
+.tc-charge-track{position:absolute;left:0;right:0;bottom:0;height:2px;overflow:hidden;background:rgba(255,255,255,.06)}
+.tc-charge-track span{position:absolute;top:0;bottom:0;width:32%;border-radius:2px;background:linear-gradient(90deg,transparent,rgba(52,211,153,.85),transparent);opacity:0}
+.tc-charge.charging .tc-charge-track span{opacity:1;animation:charge-track 1.5s linear infinite}
+.tc-charge.charging .tc-charge-track span:nth-child(2){animation-delay:.5s}
+.tc-charge.charging .tc-charge-track span:nth-child(3){animation-delay:1s}
 .tc-clim-row{display:flex;justify-content:space-between;align-items:center}
 .tc-clim-left{display:flex;align-items:center;gap:9px}
 .tc-clim-icon{--mdc-icon-size:21px;color:rgba(255,255,255,.58)}
@@ -2202,6 +2294,10 @@ button.is-pressed{transform:scale(.93)!important;filter:brightness(1.2)}
 .tb-climate.on span{color:#a7f3d0}
 .tb-sentry.on span{color:#fecaca}
 @keyframes sentry-pulse{0%,100%{opacity:1;transform:scale(1)}50%{opacity:.45;transform:scale(.72)}}
+@keyframes charge-sweep{from{transform:translateX(-100%)}to{transform:translateX(100%)}}
+@keyframes charge-track{from{left:-35%}to{left:103%}}
+@keyframes charge-glow{0%,100%{opacity:.68}50%{opacity:1}}
+@keyframes charge-car{0%,100%{filter:drop-shadow(0 13px 19px rgba(0,0,0,.64))}50%{filter:drop-shadow(0 13px 24px rgba(52,211,153,.28))}}
 
 /* Weather */
 .wx-big{padding:9px 12px;transition:background .4s,border-color .4s;position:relative;overflow:hidden;box-shadow:inset 0 1px 0 rgba(255,255,255,.08),0 16px 44px rgba(0,0,0,.20)}
