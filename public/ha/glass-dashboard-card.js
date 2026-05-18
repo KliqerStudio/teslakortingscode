@@ -52,6 +52,7 @@ class GlassDashboardCard extends HTMLElement {
       bedAir:         "sensor.bedroom_sensor_air_quality",
       bedPm25:        "sensor.bedroom_sensor_pm2_5",
       weather:        "weather.buienradar",
+      sun:            "sun.sun",
       teslaClimate:   "climate.model_3_climate",
       teslaBattery:   "sensor.model_3_battery_level",
       teslaRange:     "sensor.model_3_battery_range",
@@ -124,7 +125,7 @@ class GlassDashboardCard extends HTMLElement {
     const watch = [
       ...e.mainLights, ...e.bedroomLights, ...e.gameLights, ...e.utilityLights, ...e.toonDevices,
       e.livingTemp, e.livingHumidity, e.livingAir, e.livingPm25,
-      e.bedTemp, e.bedHumidity, e.bedAir, e.bedPm25, e.weather,
+      e.bedTemp, e.bedHumidity, e.bedAir, e.bedPm25, e.weather, e.sun,
       e.teslaClimate, e.teslaBattery, e.teslaRange, e.teslaLocation,
       e.teslaSentry, e.teslaInsideTemp,
       e.teslaChargeCable, e.teslaChargeState, e.teslaChargeRate,
@@ -589,12 +590,39 @@ class GlassDashboardCard extends HTMLElement {
       rainy:"mdi:weather-rainy", pouring:"mdi:weather-pouring",
       cloudy:"mdi:weather-cloudy", partlycloudy:"mdi:weather-partly-cloudy",
       sunny:"mdi:weather-sunny", clear:"mdi:weather-night",
-      "clear-night":"mdi:weather-night", fog:"mdi:weather-fog",
+      "clear-night":"mdi:weather-night", "partlycloudy-night":"mdi:weather-night-partly-cloudy", fog:"mdi:weather-fog",
       snowy:"mdi:weather-snowy", windy:"mdi:weather-windy", hail:"mdi:weather-hail",
       lightning:"mdi:weather-lightning", "lightning-rainy":"mdi:weather-lightning-rainy",
       exceptional:"mdi:weather-cloudy-alert",
     };
     return m[state] || "mdi:weather-partly-cloudy";
+  }
+  isNightNow() {
+    const sun = this._hass?.states?.[this.entities.sun]?.state;
+    if (sun === "below_horizon") return true;
+    if (sun === "above_horizon") return false;
+    const now = new Date();
+    const hour = Number(now.toLocaleTimeString("en-GB", {
+      hour: "2-digit",
+      hour12: false,
+      timeZone: "Europe/Amsterdam",
+    }).slice(0, 2));
+    if (!Number.isFinite(hour)) return false;
+    return hour < 6 || hour >= 21;
+  }
+  displayWeatherState(state) {
+    const raw = String(state || "partlycloudy").toLowerCase();
+    if (!this.isNightNow()) return raw;
+    if (raw === "sunny" || raw === "clear") return "clear-night";
+    if (raw === "partlycloudy") return "partlycloudy-night";
+    return raw;
+  }
+  weatherLabel(state) {
+    const labels = {
+      "clear-night": "Clear night",
+      "partlycloudy-night": "Partly cloudy night",
+    };
+    return labels[state] || String(state || "Unknown").replace(/-/g, " ");
   }
   fmtTime(secs) {
     if (!secs || secs < 0) return "0:00";
@@ -1801,6 +1829,7 @@ class GlassDashboardCard extends HTMLElement {
       sunny:         { bg:"rgba(251,191,36,.16)",  border:"rgba(251,191,36,.26)",  ico:"#fbbf24" },
       "clear-night": { bg:"rgba(99,102,241,.16)",  border:"rgba(99,102,241,.26)",  ico:"#818cf8" },
       clear:         { bg:"rgba(99,102,241,.14)",  border:"rgba(99,102,241,.22)",  ico:"#818cf8" },
+      "partlycloudy-night": { bg:"rgba(79,70,229,.14)", border:"rgba(129,140,248,.22)", ico:"#a5b4fc" },
       partlycloudy:  { bg:"rgba(148,163,184,.11)", border:"rgba(148,163,184,.18)", ico:"rgba(255,255,255,.62)" },
       cloudy:        { bg:"rgba(100,116,139,.14)", border:"rgba(100,116,139,.2)",  ico:"rgba(255,255,255,.5)" },
       rainy:         { bg:"rgba(59,130,246,.16)",  border:"rgba(59,130,246,.26)",  ico:"#60a5fa" },
@@ -1812,8 +1841,9 @@ class GlassDashboardCard extends HTMLElement {
       lightning:     { bg:"rgba(88,28,135,.2)",    border:"rgba(250,204,21,.26)",  ico:"#fde047" },
       "lightning-rainy": { bg:"rgba(30,64,175,.22)", border:"rgba(250,204,21,.28)", ico:"#fde047" },
     };
-    const acc = condAccent[state] || condAccent.partlycloudy;
-    const mood = `wx-${String(state || "partlycloudy").replace(/[^a-z0-9-]/gi,"")}`;
+    const displayState = this.displayWeatherState(state);
+    const acc = condAccent[displayState] || condAccent.partlycloudy;
+    const mood = `wx-${String(displayState || "partlycloudy").replace(/[^a-z0-9-]/gi,"")}`;
 
     const days = (this._forecast||[]).slice(0,5);
     const forecastHTML = days.length
@@ -1831,10 +1861,10 @@ class GlassDashboardCard extends HTMLElement {
       <div class="slbl" style="color:rgba(255,255,255,.42)">Weather · Outside</div>
       <div class="wx-hero">
         <div class="wx-hero-left">
-          <ha-icon class="wx-ico-big" icon="${this.weatherIcon(state)}" style="color:${acc.ico}"></ha-icon>
+          <ha-icon class="wx-ico-big" icon="${this.weatherIcon(displayState)}" style="color:${acc.ico}"></ha-icon>
           <div>
             <div class="wx-tmp-big">${temp}<span>°C</span></div>
-            <div class="wx-cond-big">${state.replace(/-/g," ")}</div>
+            <div class="wx-cond-big">${this.weatherLabel(displayState)}</div>
           </div>
         </div>
         <div class="wx-details">
@@ -2317,13 +2347,14 @@ button.is-pressed{transform:scale(.93)!important;filter:brightness(1.2)}
 .wx-big>*:not(.wx-sky){position:relative;z-index:1}
 .wx-sky{position:absolute;inset:0;z-index:0;pointer-events:none;opacity:1;background:radial-gradient(circle at 12% 86%,rgba(239,68,68,.20),transparent 28%),radial-gradient(circle at 88% 20%,rgba(255,255,255,.08),transparent 32%)}
 .wx-sky span{position:absolute;display:block}
-.wx-cloudy .wx-sky span,.wx-partlycloudy .wx-sky span,.wx-rainy .wx-sky span,.wx-pouring .wx-sky span,.wx-lightning-rainy .wx-sky span{width:240px;height:92px;border-radius:999px;background:rgba(255,255,255,.16);filter:blur(14px)}
-.wx-cloudy .wx-sky span:nth-child(1),.wx-partlycloudy .wx-sky span:nth-child(1),.wx-rainy .wx-sky span:nth-child(1),.wx-pouring .wx-sky span:nth-child(1),.wx-lightning-rainy .wx-sky span:nth-child(1){top:2px;right:4%;transform:rotate(-8deg);animation:cloud-drift-1 20s ease-in-out infinite alternate}
-.wx-cloudy .wx-sky span:nth-child(2),.wx-partlycloudy .wx-sky span:nth-child(2),.wx-rainy .wx-sky span:nth-child(2),.wx-pouring .wx-sky span:nth-child(2),.wx-lightning-rainy .wx-sky span:nth-child(2){top:66px;left:18%;width:260px;opacity:.75;animation:cloud-drift-2 24s ease-in-out infinite alternate}
-.wx-cloudy .wx-sky span:nth-child(3),.wx-partlycloudy .wx-sky span:nth-child(3),.wx-rainy .wx-sky span:nth-child(3),.wx-pouring .wx-sky span:nth-child(3){bottom:8px;right:28%;width:210px;opacity:.45;animation:cloud-drift-3 28s ease-in-out infinite alternate}
+.wx-cloudy .wx-sky span,.wx-partlycloudy .wx-sky span,.wx-partlycloudy-night .wx-sky span,.wx-rainy .wx-sky span,.wx-pouring .wx-sky span,.wx-lightning-rainy .wx-sky span{width:240px;height:92px;border-radius:999px;background:rgba(255,255,255,.16);filter:blur(14px)}
+.wx-cloudy .wx-sky span:nth-child(1),.wx-partlycloudy .wx-sky span:nth-child(1),.wx-partlycloudy-night .wx-sky span:nth-child(1),.wx-rainy .wx-sky span:nth-child(1),.wx-pouring .wx-sky span:nth-child(1),.wx-lightning-rainy .wx-sky span:nth-child(1){top:2px;right:4%;transform:rotate(-8deg);animation:cloud-drift-1 20s ease-in-out infinite alternate}
+.wx-cloudy .wx-sky span:nth-child(2),.wx-partlycloudy .wx-sky span:nth-child(2),.wx-partlycloudy-night .wx-sky span:nth-child(2),.wx-rainy .wx-sky span:nth-child(2),.wx-pouring .wx-sky span:nth-child(2),.wx-lightning-rainy .wx-sky span:nth-child(2){top:66px;left:18%;width:260px;opacity:.75;animation:cloud-drift-2 24s ease-in-out infinite alternate}
+.wx-cloudy .wx-sky span:nth-child(3),.wx-partlycloudy .wx-sky span:nth-child(3),.wx-partlycloudy-night .wx-sky span:nth-child(3),.wx-rainy .wx-sky span:nth-child(3),.wx-pouring .wx-sky span:nth-child(3){bottom:8px;right:28%;width:210px;opacity:.45;animation:cloud-drift-3 28s ease-in-out infinite alternate}
 .wx-sunny .wx-sky{background:linear-gradient(145deg,rgba(251,191,36,.18),rgba(59,130,246,.10)),radial-gradient(circle at 13% 80%,rgba(248,113,113,.32),transparent 30%)}
 .wx-sunny .wx-sky::before{content:"";position:absolute;left:4%;top:6%;width:190px;height:190px;border-radius:50%;background:radial-gradient(circle,rgba(251,191,36,.55),rgba(251,191,36,.16) 46%,transparent 70%);filter:blur(2px);animation:sun-breathe 5s ease-in-out infinite}
-.wx-clear-night .wx-sky::before,.wx-clear .wx-sky::before{content:"";position:absolute;right:8%;top:10%;width:95px;height:95px;border-radius:50%;background:radial-gradient(circle,rgba(199,210,254,.22),rgba(129,140,248,.05) 48%,transparent 72%)}
+.wx-clear-night .wx-sky,.wx-partlycloudy-night .wx-sky,.wx-clear .wx-sky{background:linear-gradient(145deg,rgba(30,27,75,.28),rgba(15,23,42,.12)),radial-gradient(circle at 82% 16%,rgba(129,140,248,.18),transparent 28%),radial-gradient(circle at 10% 84%,rgba(59,130,246,.12),transparent 32%)}
+.wx-clear-night .wx-sky::before,.wx-partlycloudy-night .wx-sky::before,.wx-clear .wx-sky::before{content:"";position:absolute;right:8%;top:10%;width:95px;height:95px;border-radius:50%;background:radial-gradient(circle,rgba(199,210,254,.32),rgba(129,140,248,.08) 48%,transparent 72%)}
 .wx-rainy .wx-sky,.wx-pouring .wx-sky,.wx-lightning-rainy .wx-sky{background:linear-gradient(145deg,rgba(37,99,235,.30),rgba(15,23,42,.08)),radial-gradient(circle at 10% 80%,rgba(37,99,235,.30),transparent 30%)}
 .wx-rainy .wx-sky::after,.wx-pouring .wx-sky::after,.wx-lightning-rainy .wx-sky::after{content:"";position:absolute;inset:-80px 0 0;background:repeating-linear-gradient(105deg,transparent 0 14px,rgba(96,165,250,.38) 15px 17px,transparent 18px 28px);opacity:.48;transform:translateX(-20px);animation:rain-slide .85s linear infinite}
 .wx-lightning .wx-sky::before,.wx-lightning-rainy .wx-sky::before{content:"";position:absolute;right:18%;top:10%;width:80px;height:120px;background:linear-gradient(140deg,transparent 0 38%,rgba(253,224,71,.55) 39% 43%,transparent 44% 100%);filter:drop-shadow(0 0 16px rgba(253,224,71,.55));animation:lightning-flash 4.5s steps(1,end) infinite}
