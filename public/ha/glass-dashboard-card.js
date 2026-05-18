@@ -25,7 +25,6 @@ class GlassDashboardCard extends HTMLElement {
     this._colorPickerOpenUntil = 0;
     this._energy = { prefs: null, stats: {}, period: "day", loadedAt: {}, loading: false, loadingPeriods: new Set() };
     this._energyRate = 0.29; // €/kWh — change to match your contract
-    this._teslaFullRangeKm = 418; // Used only to estimate a one-decimal battery value from Tesla's decimal range sensor.
     // Presence detection
     this._presence = {
       stream: null, video: null, canvas: null, ctx: null,
@@ -1636,17 +1635,12 @@ class GlassDashboardCard extends HTMLElement {
 
   teslaBatteryPercent(rawPct) {
     const raw = Number(rawPct);
-    const range = Number(this.st(this.entities.teslaRange, NaN));
-    const estimate = Number.isFinite(range) && this._teslaFullRangeKm > 0 ? (range / this._teslaFullRangeKm) * 100 : NaN;
-    if (Number.isFinite(raw) && Number.isFinite(estimate) && Math.abs(estimate - raw) <= 2.5) {
-      return Math.max(0, Math.min(100, estimate));
-    }
-    return Number.isFinite(raw) ? raw : 0;
+    return Number.isFinite(raw) ? Math.max(0, Math.min(100, raw)) : 0;
   }
 
   teslaBatteryDisplay(pct, charge) {
     const value = Math.max(0, Math.min(100, Number(pct) || 0));
-    return charge?.active ? value.toFixed(2) : String(Math.round(value));
+    return charge?.active ? value.toFixed(1) : String(Math.round(value));
   }
 
   formatChargeTime(entity) {
