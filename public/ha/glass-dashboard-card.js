@@ -25,6 +25,7 @@ class GlassDashboardCard extends HTMLElement {
     this._colorPickerOpenUntil = 0;
     this._energy = { prefs: null, stats: {}, period: "day", loadedAt: {}, loading: false, loadingPeriods: new Set() };
     this._energyRate = 0.29; // €/kWh — change to match your contract
+    this._teslaFullRangeKm = 418; // Used only to estimate a one-decimal battery value from Tesla's decimal range sensor.
     // Presence detection
     this._presence = {
       stream: null, video: null, canvas: null, ctx: null,
@@ -1074,6 +1075,7 @@ class GlassDashboardCard extends HTMLElement {
     const utilityOn = this.anyOn(e.utilityLights);
 
     const batteryRaw  = Number(this.st(e.teslaBattery,"0")) || 0;
+    const batteryPct  = this.teslaBatteryPercent(batteryRaw);
     const range       = this.fmt(e.teslaRange," km","--",0);
     const teslaPlace  = this.niceState(e.teslaLocation,"Away");
     const climOn      = this.isOn(e.teslaClimate);
@@ -1171,7 +1173,7 @@ class GlassDashboardCard extends HTMLElement {
 
       <!-- RIGHT: Tesla + Spotify -->
       <div class="col">
-        ${this.teslaCard(batteryRaw,range,teslaPlace,climOn,targetTemp,teslaCharge)}
+        ${this.teslaCard(batteryPct,range,teslaPlace,climOn,targetTemp,teslaCharge)}
         ${this.spotifySection(spotifyPic,spotifyTitle,spotifyArtist,spotifyAlbum,spotifyActive,spotifyPlaying,curPos,durSec,spProg,volPct)}
         ${this.pulseSection()}
       </div>
@@ -1618,6 +1620,7 @@ class GlassDashboardCard extends HTMLElement {
       : plugged ? "Plugged in" : "Not plugged in";
     const rate = Number.isFinite(rateNum) ? `${Math.round(rateNum)} km/h` : "-- km/h";
     const power = Number.isFinite(powerNum) ? `${powerNum.toFixed(powerNum >= 10 ? 0 : 1)} kW` : "-- kW";
+    const time = this.formatChargeTime(e.teslaChargeTime);
     return {
       active,
       plugged,
@@ -1625,8 +1628,19 @@ class GlassDashboardCard extends HTMLElement {
       stateLabel,
       rate,
       power,
-      time: this.formatChargeTime(e.teslaChargeTime),
+      time,
+      timeShort: time.split(" · ")[0] || time,
     };
+  }
+
+  teslaBatteryPercent(rawPct) {
+    const raw = Number(rawPct);
+    const range = Number(this.st(this.entities.teslaRange, NaN));
+    const estimate = Number.isFinite(range) && this._teslaFullRangeKm > 0 ? (range / this._teslaFullRangeKm) * 100 : NaN;
+    if (Number.isFinite(raw) && Number.isFinite(estimate) && Math.abs(estimate - raw) <= 2.5) {
+      return Math.max(0, Math.min(100, estimate));
+    }
+    return Number.isFinite(raw) ? raw : 0;
   }
 
   formatChargeTime(entity) {
@@ -1647,14 +1661,16 @@ class GlassDashboardCard extends HTMLElement {
     const clim = this.teslaClimateState(climOn, targetTemp);
     const sentryOn = this.isOn(this.entities.teslaSentry);
     const chargeClass = charge?.active ? "charging" : charge?.plugged ? "plugged" : "";
-    return `<section class="gl tc ${chargeClass}">
+    const tag = charge?.active ? "Charging" : charge?.plugged ? "Plugged in" : (place || "Away");
+    const phase = -((Date.now() % 3000) / 1000).toFixed(2);
+    return `<section class="gl tc ${chargeClass}" style="--charge-phase:${phase}s">
       <div class="tc-hero">
         <div class="tc-top">
           <div>
             <div class="tc-name">Model 3</div>
             <div class="tc-sub">Tesla</div>
           </div>
-          <div class="tag">${place}</div>
+          <div class="tag">${tag}</div>
         </div>
         <div class="tc-img-wrap">
           <div class="tc-glow"></div>
@@ -1663,7 +1679,7 @@ class GlassDashboardCard extends HTMLElement {
       </div>
       <div class="tc-stats">
         <div class="tc-batt-row">
-          <div class="tc-pct" style="color:${battColor}">${Math.round(pct)}<span>%</span></div>
+          <div class="tc-pct" style="color:${battColor}">${pct.toFixed(1)}<span>%</span></div>
           <div class="tc-range">${range}</div>
         </div>
         <div class="tc-bar"><div class="tc-fill" style="width:${pct}%;background:${battColor}"></div></div>
@@ -1676,7 +1692,7 @@ class GlassDashboardCard extends HTMLElement {
             <div class="tc-charge-time">${charge?.time || "--"}</div>
           </div>
           <div class="tc-charge-grid">
-            <div><b>${charge?.rate || "-- km/h"}</b><span>rate</span></div>
+            <div><b>${charge?.timeShort || "--"}</b><span>to 100%</span></div>
             <div><b>${charge?.power || "-- kW"}</b><span>power</span></div>
           </div>
           <div class="tc-charge-track"><span></span><span></span><span></span></div>
@@ -1879,10 +1895,8 @@ class GlassDashboardCard extends HTMLElement {
     }).join("");
     const points = parsed.map((d, i) => {
       const hx = hiPts[i][0], hy = hiPts[i][1], lx = loPts[i][0], ly = loPts[i][1];
-      return `<g>
-        <circle cx="${hx.toFixed(1)}" cy="${hy.toFixed(1)}" r="3.9" fill="rgba(255,255,255,.93)" stroke="rgba(5,8,24,.55)" stroke-width="1"/>
-        <circle cx="${lx.toFixed(1)}" cy="${ly.toFixed(1)}" r="3.2" fill="rgba(147,197,253,.92)" stroke="rgba(5,8,24,.45)" stroke-width="1"/>
-      </g>`;
+      return `<div class="wx-dot hi" style="left:${(hx / W * 100).toFixed(2)}%;top:${(34 + hy).toFixed(1)}px"></div>
+        <div class="wx-dot lo" style="left:${(lx / W * 100).toFixed(2)}%;top:${(34 + ly).toFixed(1)}px"></div>`;
     }).join("");
     // SVG is positioned at top:34px inside .wx-graph; viewBox H=76 maps 1:1 to 76px
     const tempLabels = parsed.map((d, i) => {
@@ -1917,8 +1931,8 @@ class GlassDashboardCard extends HTMLElement {
         <path d="${bandPath}" fill="url(#wxBand)"/>
         ${lowSegments}
         ${segments}
-        ${points}
       </svg>
+      ${points}
       ${tempLabels}
     </div>`;
   }
@@ -2222,8 +2236,7 @@ button.is-pressed{transform:scale(.93)!important;filter:brightness(1.2)}
 .tc-img-wrap{width:100%;height:120px;position:relative;background:transparent;display:flex;align-items:center;justify-content:center;overflow:hidden}
 .tc-glow{position:absolute;bottom:0;left:0;right:0;height:50px;background:radial-gradient(ellipse 90% 100% at 50% 100%,rgba(60,90,220,.2),transparent 70%);pointer-events:none}
 .tc-car{width:98%;height:100%;object-fit:contain;object-position:center center;filter:drop-shadow(0 13px 19px rgba(0,0,0,.64));pointer-events:none;user-select:none;position:relative;z-index:1;transform:translateY(0)}
-.tc.charging .tc-glow{background:radial-gradient(ellipse 90% 100% at 50% 100%,rgba(52,211,153,.30),transparent 70%);animation:charge-glow 1.7s ease-in-out infinite}
-.tc.charging .tc-car{animation:charge-car 2.3s ease-in-out infinite}
+.tc.charging .tc-glow{background:radial-gradient(ellipse 90% 100% at 50% 100%,rgba(52,211,153,.30),transparent 70%);animation:charge-glow 2.8s ease-in-out infinite;animation-delay:var(--charge-phase)}
 .tc-stats{padding:7px 11px 5px}
 .tc-batt-row{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:5px}
 .tc-pct{font-size:40px;font-weight:800;letter-spacing:-2px;line-height:1}
@@ -2232,7 +2245,7 @@ button.is-pressed{transform:scale(.93)!important;filter:brightness(1.2)}
 .tc-bar{height:3px;background:rgba(255,255,255,.12);border-radius:2px;margin-bottom:7px;overflow:hidden}
 .tc-fill{height:100%;border-radius:2px;transition:width .4s}
 .tc.charging .tc-fill{position:relative;overflow:hidden}
-.tc.charging .tc-fill::after{content:"";position:absolute;inset:0;background:linear-gradient(90deg,transparent,rgba(255,255,255,.55),transparent);animation:charge-sweep 1.25s linear infinite}
+.tc.charging .tc-fill::after{content:"";position:absolute;inset:0;background:linear-gradient(90deg,transparent,rgba(255,255,255,.55),transparent);animation:charge-sweep 3s linear infinite;animation-delay:var(--charge-phase)}
 .tc-charge{margin:0 0 7px;padding:7px 8px;border-radius:10px;background:rgba(255,255,255,.045);border:1px solid rgba(255,255,255,.075);overflow:hidden;position:relative}
 .tc-charge.plugged{background:rgba(96,165,250,.07);border-color:rgba(96,165,250,.16)}
 .tc-charge.charging{background:rgba(52,211,153,.075);border-color:rgba(52,211,153,.22)}
@@ -2249,9 +2262,9 @@ button.is-pressed{transform:scale(.93)!important;filter:brightness(1.2)}
 .tc-charge-grid span{display:block;margin-top:2px;font-size:8px;letter-spacing:.45px;text-transform:uppercase;color:rgba(255,255,255,.38)}
 .tc-charge-track{position:absolute;left:0;right:0;bottom:0;height:2px;overflow:hidden;background:rgba(255,255,255,.06)}
 .tc-charge-track span{position:absolute;top:0;bottom:0;width:32%;border-radius:2px;background:linear-gradient(90deg,transparent,rgba(52,211,153,.85),transparent);opacity:0}
-.tc-charge.charging .tc-charge-track span{opacity:1;animation:charge-track 1.5s linear infinite}
-.tc-charge.charging .tc-charge-track span:nth-child(2){animation-delay:.5s}
-.tc-charge.charging .tc-charge-track span:nth-child(3){animation-delay:1s}
+.tc-charge.charging .tc-charge-track span{opacity:1;animation:charge-track 3s linear infinite;animation-delay:var(--charge-phase)}
+.tc-charge.charging .tc-charge-track span:nth-child(2){animation-delay:calc(var(--charge-phase) + .5s)}
+.tc-charge.charging .tc-charge-track span:nth-child(3){animation-delay:calc(var(--charge-phase) + 1s)}
 .tc-clim-row{display:flex;justify-content:space-between;align-items:center}
 .tc-clim-left{display:flex;align-items:center;gap:9px}
 .tc-clim-icon{--mdc-icon-size:21px;color:rgba(255,255,255,.58)}
@@ -2294,10 +2307,9 @@ button.is-pressed{transform:scale(.93)!important;filter:brightness(1.2)}
 .tb-climate.on span{color:#a7f3d0}
 .tb-sentry.on span{color:#fecaca}
 @keyframes sentry-pulse{0%,100%{opacity:1;transform:scale(1)}50%{opacity:.45;transform:scale(.72)}}
-@keyframes charge-sweep{from{transform:translateX(-100%)}to{transform:translateX(100%)}}
+@keyframes charge-sweep{from{transform:translateX(-110%)}to{transform:translateX(110%)}}
 @keyframes charge-track{from{left:-35%}to{left:103%}}
 @keyframes charge-glow{0%,100%{opacity:.68}50%{opacity:1}}
-@keyframes charge-car{0%,100%{filter:drop-shadow(0 13px 19px rgba(0,0,0,.64))}50%{filter:drop-shadow(0 13px 24px rgba(52,211,153,.28))}}
 
 /* Weather */
 .wx-big{padding:9px 12px;transition:background .4s,border-color .4s;position:relative;overflow:hidden;box-shadow:inset 0 1px 0 rgba(255,255,255,.08),0 16px 44px rgba(0,0,0,.20)}
@@ -2345,6 +2357,9 @@ button.is-pressed{transform:scale(.93)!important;filter:brightness(1.2)}
 .wxg-icon{--mdc-icon-size:17px;filter:drop-shadow(0 2px 5px rgba(0,0,0,.35))}
 .wxg-rain{font-size:9px;color:rgba(96,165,250,.88);font-weight:800}
 .wxg-svg{position:absolute;left:0;right:0;top:34px;width:100%;height:76px;display:block;overflow:visible}
+.wx-dot{position:absolute;z-index:4;transform:translate(-50%,-50%);border-radius:50%;pointer-events:none;box-shadow:0 1px 5px rgba(0,0,0,.45)}
+.wx-dot.hi{width:8px;height:8px;background:rgba(255,255,255,.92);border:1px solid rgba(5,8,24,.45)}
+.wx-dot.lo{width:6px;height:6px;background:rgba(147,197,253,.9);border:1px solid rgba(5,8,24,.35)}
 .wx-temp-label{position:absolute;z-index:5;transform:translateX(-50%) translateY(-50%);font-weight:800;line-height:1;letter-spacing:0;text-shadow:0 2px 6px rgba(5,8,24,.9),0 0 10px rgba(5,8,24,.7);white-space:nowrap;pointer-events:none}
 .wx-temp-label.hi{font-size:17px;color:rgba(255,255,255,.96)}
 .wx-temp-label.lo{font-size:13px;color:rgba(147,197,253,.9)}
