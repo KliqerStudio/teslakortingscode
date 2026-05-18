@@ -1776,13 +1776,16 @@ class GlassDashboardCard extends HTMLElement {
 
     if (!parsed.length) return "";
 
-    const W = 500, H = 108, top = 18, bottom = 96;
+    const W = 500, H = 76, top = 12, bottom = 64;
     const temps = parsed.flatMap(d => [d.hi, d.lo]);
     const minT = Math.min(...temps);
     const maxT = Math.max(...temps);
-    const rng = Math.max(1, maxT - minT);
-    const x = i => parsed.length === 1 ? W / 2 : 34 + i * ((W - 68) / (parsed.length - 1));
-    const y = v => bottom - ((v - minT) / rng) * (bottom - top);
+    const tempPad = Math.max(2, (maxT - minT) * 0.18);
+    const loScale = minT - tempPad;
+    const hiScale = maxT + tempPad;
+    const rng = Math.max(1, hiScale - loScale);
+    const x = i => parsed.length === 1 ? W / 2 : 42 + i * ((W - 84) / (parsed.length - 1));
+    const y = v => bottom - ((v - loScale) / rng) * (bottom - top);
     const hiPts = parsed.map((d, i) => [x(i), y(d.hi), d.hi]);
     const loPts = parsed.map((d, i) => [x(i), y(d.lo), d.lo]);
     const path = pts => pts.map((p, i) => `${i ? "L" : "M"}${p[0].toFixed(1)},${p[1].toFixed(1)}`).join(" ");
@@ -1791,30 +1794,29 @@ class GlassDashboardCard extends HTMLElement {
       const n = hiPts[i + 1];
       const delta = parsed[i + 1].hi - parsed[i].hi;
       const color = delta > 0 ? "#f59e0b" : delta < 0 ? "#60a5fa" : "#a78bfa";
-      return `<path d="M${p[0].toFixed(1)},${p[1].toFixed(1)} L${n[0].toFixed(1)},${n[1].toFixed(1)}" stroke="${color}" stroke-width="4" stroke-linecap="round"/>`;
+      return `<path d="M${p[0].toFixed(1)},${p[1].toFixed(1)} L${n[0].toFixed(1)},${n[1].toFixed(1)}" stroke="${color}" stroke-width="3.2" stroke-linecap="round"/>`;
     }).join("");
     const lowSegments = loPts.slice(0, -1).map((p, i) => {
       const n = loPts[i + 1];
       const delta = parsed[i + 1].lo - parsed[i].lo;
       const color = delta > 0 ? "rgba(251,191,36,.78)" : delta < 0 ? "rgba(96,165,250,.78)" : "rgba(167,139,250,.68)";
-      return `<path d="M${p[0].toFixed(1)},${p[1].toFixed(1)} L${n[0].toFixed(1)},${n[1].toFixed(1)}" stroke="${color}" stroke-width="2" stroke-linecap="round" stroke-dasharray="3 5"/>`;
+      return `<path d="M${p[0].toFixed(1)},${p[1].toFixed(1)} L${n[0].toFixed(1)},${n[1].toFixed(1)}" stroke="${color}" stroke-width="2.1" stroke-linecap="round" stroke-dasharray="3 6"/>`;
+    }).join("");
+    const dayGuides = parsed.map((_, i) => {
+      const gx = x(i);
+      return `<path d="M${gx.toFixed(1)},${top} L${gx.toFixed(1)},${bottom}" stroke="rgba(255,255,255,.07)" stroke-width="1"/>`;
     }).join("");
     const points = parsed.map((d, i) => {
       const hx = hiPts[i][0], hy = hiPts[i][1], lx = loPts[i][0], ly = loPts[i][1];
       return `<g>
-        <line x1="${hx.toFixed(1)}" y1="${(hy + 7).toFixed(1)}" x2="${lx.toFixed(1)}" y2="${(ly - 7).toFixed(1)}" stroke="rgba(255,255,255,.12)" stroke-width="1"/>
-        <circle cx="${hx.toFixed(1)}" cy="${hy.toFixed(1)}" r="4" fill="rgba(255,255,255,.95)"/>
-        <circle cx="${lx.toFixed(1)}" cy="${ly.toFixed(1)}" r="3" fill="rgba(147,197,253,.95)"/>
+        <circle cx="${hx.toFixed(1)}" cy="${hy.toFixed(1)}" r="3.9" fill="rgba(255,255,255,.93)" stroke="rgba(5,8,24,.55)" stroke-width="1"/>
+        <circle cx="${lx.toFixed(1)}" cy="${ly.toFixed(1)}" r="3.2" fill="rgba(147,197,253,.92)" stroke="rgba(5,8,24,.45)" stroke-width="1"/>
       </g>`;
     }).join("");
-    const graphTop = 28, graphH = 76;
-    const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
     const tempLabels = parsed.map((d, i) => {
-      const hx = hiPts[i][0], hy = hiPts[i][1], lx = loPts[i][0], ly = loPts[i][1];
-      const hiTop = clamp(graphTop + (hy / H) * graphH - 17, graphTop + 1, graphTop + graphH - 36);
-      const loTop = clamp(graphTop + (ly / H) * graphH + 4, graphTop + 18, graphTop + graphH - 15);
-      return `<div class="wx-temp-label hi" style="left:${(hx / W * 100).toFixed(2)}%;top:${hiTop.toFixed(1)}px">${d.hi}°</div>
-        <div class="wx-temp-label lo" style="left:${(lx / W * 100).toFixed(2)}%;top:${loTop.toFixed(1)}px">${d.lo}°</div>`;
+      const left = (x(i) / W * 100).toFixed(2);
+      return `<div class="wx-temp-label hi" style="left:${left}%">${d.hi}°</div>
+        <div class="wx-temp-label lo" style="left:${left}%">${d.lo}°</div>`;
     }).join("");
     const dayNodes = parsed.map((d, i) => {
       const ca = condAccent[d.cond] || condAccent.partlycloudy;
@@ -1834,9 +1836,10 @@ class GlassDashboardCard extends HTMLElement {
             <stop offset="100%" stop-color="rgba(96,165,250,.12)"/>
           </linearGradient>
         </defs>
-        <path d="M28,${top} L${W-28},${top}" stroke="rgba(255,255,255,.06)" stroke-width="1"/>
-        <path d="M28,${(top + bottom) / 2} L${W-28},${(top + bottom) / 2}" stroke="rgba(255,255,255,.05)" stroke-width="1"/>
-        <path d="M28,${bottom} L${W-28},${bottom}" stroke="rgba(255,255,255,.06)" stroke-width="1"/>
+        <path d="M28,${top} L${W-28},${top}" stroke="rgba(255,255,255,.055)" stroke-width="1"/>
+        <path d="M28,${(top + bottom) / 2} L${W-28},${(top + bottom) / 2}" stroke="rgba(255,255,255,.045)" stroke-width="1"/>
+        <path d="M28,${bottom} L${W-28},${bottom}" stroke="rgba(255,255,255,.055)" stroke-width="1"/>
+        ${dayGuides}
         <path d="${bandPath}" fill="url(#wxBand)"/>
         ${lowSegments}
         ${segments}
@@ -2233,16 +2236,16 @@ button.is-pressed{transform:scale(.93)!important;filter:brightness(1.2)}
 .wxdh{font-size:16px;font-weight:700;color:rgba(255,255,255,.88)}
 .wxdl{font-size:12px;color:rgba(255,255,255,.47);margin-top:1px}
 .wx-precip{font-size:10px;color:rgba(96,165,250,.8);margin-top:2px;font-weight:700}
-.wx-graph{position:relative;height:104px;border-radius:11px;overflow:hidden;background:rgba(255,255,255,.045);border:1px solid rgba(255,255,255,.075);padding-top:28px}
-.wxg-days{position:absolute;left:0;right:0;top:4px;height:28px;z-index:2}
-.wxg-day{position:absolute;top:0;transform:translateX(-50%);display:flex;align-items:center;gap:5px;min-width:58px;justify-content:center;white-space:nowrap}
+.wx-graph{position:relative;height:126px;border-radius:11px;overflow:hidden;background:linear-gradient(180deg,rgba(255,255,255,.055),rgba(255,255,255,.025));border:1px solid rgba(255,255,255,.075);padding-top:30px}
+.wxg-days{position:absolute;left:0;right:0;top:7px;height:26px;z-index:4}
+.wxg-day{position:absolute;top:0;transform:translateX(-50%);display:flex;align-items:center;gap:5px;min-width:62px;justify-content:center;white-space:nowrap}
 .wxg-label{font-size:9px;color:rgba(255,255,255,.52);text-transform:uppercase;letter-spacing:.45px;font-weight:800}
 .wxg-icon{--mdc-icon-size:17px;filter:drop-shadow(0 2px 5px rgba(0,0,0,.35))}
 .wxg-rain{font-size:9px;color:rgba(96,165,250,.88);font-weight:800}
-.wxg-svg{position:absolute;left:0;right:0;top:28px;width:100%;height:76px;display:block;overflow:visible}
-.wx-temp-label{position:absolute;z-index:3;transform:translateX(-50%);font-weight:800;line-height:1;letter-spacing:0;text-shadow:0 2px 5px rgba(5,8,24,.8),0 0 8px rgba(5,8,24,.7);white-space:nowrap;pointer-events:none}
-.wx-temp-label.hi{font-size:18px;color:rgba(255,255,255,.95)}
-.wx-temp-label.lo{font-size:14px;color:rgba(191,219,254,.84)}
+.wxg-svg{position:absolute;left:0;right:0;top:34px;width:100%;height:76px;display:block;overflow:visible}
+.wx-temp-label{position:absolute;z-index:5;transform:translateX(-50%);font-weight:800;line-height:1;letter-spacing:0;text-shadow:0 2px 5px rgba(5,8,24,.85),0 0 8px rgba(5,8,24,.65);white-space:nowrap;pointer-events:none}
+.wx-temp-label.hi{top:40px;font-size:19px;color:rgba(255,255,255,.96)}
+.wx-temp-label.lo{bottom:9px;font-size:15px;color:rgba(191,219,254,.86)}
 @keyframes cloud-drift-1{from{transform:translateX(-10px) rotate(-8deg)}to{transform:translateX(18px) rotate(-6deg)}}
 @keyframes cloud-drift-2{from{transform:translateX(16px)}to{transform:translateX(-20px)}}
 @keyframes cloud-drift-3{from{transform:translateX(-14px)}to{transform:translateX(14px)}}
