@@ -36,7 +36,8 @@ class GlassDashboardCard extends HTMLElement {
       mainLights: [
         "light.lounge_light","light.living_room","light.reading_light",
         "light.dining_room","light.led_keuken_boven","light.led_keuken_onder",
-        "light.marylin",
+        "light.marylin","light.govee_tv_left","light.govee_tv_right",
+        "light.rgbic_tv_backlight",
       ],
       bedroomLights: ["light.bed","light.kast","light.closet","light.ants_closet","light.watch_light"],
       gameLights: [
@@ -1643,6 +1644,11 @@ class GlassDashboardCard extends HTMLElement {
     return Number.isFinite(raw) ? raw : 0;
   }
 
+  teslaBatteryDisplay(pct, charge) {
+    const value = Math.max(0, Math.min(100, Number(pct) || 0));
+    return charge?.active ? value.toFixed(2) : String(Math.round(value));
+  }
+
   formatChargeTime(entity) {
     const raw = this.st(entity, "");
     if (!raw || raw === "unavailable" || raw === "unknown" || raw === "--") return "--";
@@ -1679,7 +1685,7 @@ class GlassDashboardCard extends HTMLElement {
       </div>
       <div class="tc-stats">
         <div class="tc-batt-row">
-          <div class="tc-pct" style="color:${battColor}">${pct.toFixed(1)}<span>%</span></div>
+          <div class="tc-pct" style="color:${battColor}">${this.teslaBatteryDisplay(pct, charge)}<span>%</span></div>
           <div class="tc-range">${range}</div>
         </div>
         <div class="tc-bar"><div class="tc-fill" style="width:${pct}%;background:${battColor}"></div></div>
@@ -2158,9 +2164,9 @@ button{font:inherit;color:inherit;border:0;text-align:inherit;cursor:pointer;bac
 .home-lbl{font-size:24px;font-weight:800;color:rgba(255,255,255,.68);letter-spacing:1.2px;text-transform:uppercase;line-height:1}
 .home-sub{font-size:11px;color:rgba(255,255,255,.38);margin-top:0}
 .tabs-right{display:flex;align-items:center;gap:9px;margin-left:auto;padding-left:10px;flex-shrink:0}
-.clock-wrap{text-align:right}
-.clk-time{font-size:28px;font-weight:200;color:rgba(255,255,255,.94);letter-spacing:-1.2px;line-height:1}
-.clk-date{font-size:11px;color:rgba(255,255,255,.5);margin-top:1px}
+.clock-wrap{text-align:right;min-width:90px}
+.clk-time{font-size:38px;font-weight:200;color:rgba(255,255,255,.94);letter-spacing:-1.5px;line-height:.92}
+.clk-date{font-size:13px;color:rgba(255,255,255,.54);margin-top:2px}
 .fs-btn{display:flex;align-items:center;justify-content:center;width:30px;height:30px;border-radius:50%;background:rgba(255,255,255,.07);border:1px solid rgba(255,255,255,.12)!important;transition:all .15s,transform .08s;flex-shrink:0}
 .fs-btn:hover{background:rgba(255,255,255,.13)}
 .fs-btn ha-icon{--mdc-icon-size:16px;color:rgba(255,255,255,.6)}
