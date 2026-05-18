@@ -625,6 +625,7 @@ class GlassDashboardCard extends HTMLElement {
   colorSwatches(target, compact = false) {
     const swatches = [
       ["Warm", 38, 68, "#ffb45f"],
+      ["Pumpkin", 28, 82, "#f97316"],
       ["Soft", 48, 22, "#ffe9b8"],
       ["Pink", 335, 58, "#f472b6"],
       ["Violet", 262, 60, "#a78bfa"],
@@ -950,15 +951,20 @@ class GlassDashboardCard extends HTMLElement {
 
   _saveScroll() {
     const page = this.shadowRoot?.querySelector(".page.active");
+    const dash = this.shadowRoot?.querySelector(".dash");
     if (page) this._scrollByTab[this._tab] = page.scrollTop || 0;
+    if (dash) this._dashScrollTop = dash.scrollTop || 0;
   }
 
   _restoreScroll() {
     const top = this._scrollByTab[this._tab] || 0;
-    if (!top) return;
+    const dashTop = this._dashScrollTop || 0;
+    if (!top && !dashTop) return;
     requestAnimationFrame(() => {
       const page = this.shadowRoot?.querySelector(".page.active");
+      const dash = this.shadowRoot?.querySelector(".dash");
       if (page) page.scrollTop = top;
+      if (dash) dash.scrollTop = dashTop;
     });
   }
 
@@ -1080,6 +1086,7 @@ class GlassDashboardCard extends HTMLElement {
       <div class="col">
         ${this.teslaCard(batteryRaw,range,teslaPlace,climOn,targetTemp)}
         ${this.spotifySection(spotifyPic,spotifyTitle,spotifyArtist,spotifyAlbum,spotifyActive,spotifyPlaying,curPos,durSec,spProg,volPct)}
+        ${this.pulseSection(weatherTemp)}
       </div>
     </div>
     ${this.weatherSection(weatherState,weatherTemp,weatherHumidity,weatherWind,weatherFeels,weatherUV,weatherVis)}
@@ -1329,13 +1336,9 @@ class GlassDashboardCard extends HTMLElement {
           <b style="color:${powerColor}">${liveVal}</b>
           <span>${liveLabel} · ${liveCostTxt}</span>
         </div>
-        <div class="en-pill">
-          <b>${shownKwh > 0 ? shownKwh.toFixed(2) : "--"}<small> kWh</small></b>
-          <span>${periodLabel} usage</span>
-        </div>
-        <div class="en-pill">
-          <b>${shownKwh > 0 ? "€"+shownCost.toFixed(2) : "€--"}</b>
-          <span>spent</span>
+        <div class="en-pill total">
+          <b>${shownKwh > 0 ? shownKwh.toFixed(2) : "--"}<small> kWh</small> <em>${shownKwh > 0 ? "€"+shownCost.toFixed(2) : "€--"}</em></b>
+          <span>${periodLabel} usage · spent</span>
         </div>
       </div>
       <div class="spark-wrap en-live-spark">${this.sparkline(e.p1Power, powerColor)}</div>
@@ -1580,6 +1583,23 @@ class GlassDashboardCard extends HTMLElement {
             <span>Dining · ${spkLbl}</span>
           </div>
         </div>
+      </div>
+    </section>`;
+  }
+
+  pulseSection(weatherTemp) {
+    const e = this.entities;
+    const lightsOn = this.countOn([...e.mainLights, ...e.bedroomLights, ...e.gameLights, ...e.utilityLights]);
+    const livingAir = this.airStatus(e.livingAir, e.livingPm25);
+    const bedAir = this.airStatus(e.bedAir, e.bedPm25);
+    const bestAir = [livingAir, bedAir].every(a => a.aqLbl === "Good") ? "Good" : `${livingAir.aqLbl} / ${bedAir.aqLbl}`;
+    return `<section class="gl pulse-card">
+      <div class="slbl">Home pulse</div>
+      <div class="pulse-grid">
+        <div class="pulse-item"><ha-icon icon="mdi:lightbulb-group-outline"></ha-icon><b>${lightsOn}</b><span>lights on</span></div>
+        <div class="pulse-item"><ha-icon icon="mdi:thermometer"></ha-icon><b>${weatherTemp}°</b><span>outside</span></div>
+        <div class="pulse-item"><ha-icon icon="mdi:download-network-outline"></ha-icon><b>${this.formatRate(e.archerDown)}</b><span>internet</span></div>
+        <div class="pulse-item"><ha-icon icon="mdi:blur"></ha-icon><b>${bestAir}</b><span>air quality</span></div>
       </div>
     </section>`;
   }
@@ -1845,7 +1865,7 @@ ha-card{background:transparent;border:0;box-shadow:none;overflow:visible;min-hei
 button{font:inherit;color:inherit;border:0;text-align:inherit;cursor:pointer;background:none}
 
 /* Shell — full viewport, no max-width */
-.dash{width:100%;height:100dvh;min-height:100vh;max-width:none;border-radius:0;display:flex;flex-direction:column;font-family:-apple-system,BlinkMacSystemFont,"SF Pro Display",system-ui,sans-serif;position:relative;background:#060818;overflow:hidden}
+.dash{width:100%;height:100dvh;min-height:100vh;max-width:none;border-radius:0;display:flex;flex-direction:column;font-family:-apple-system,BlinkMacSystemFont,"SF Pro Display",system-ui,sans-serif;position:relative;background:#060818;overflow-y:auto;overflow-x:hidden;-webkit-overflow-scrolling:touch;overscroll-behavior:contain}
 .bg{position:absolute;inset:0;background:radial-gradient(ellipse 80% 60% at 15% 85%,rgba(0,180,255,.42),transparent 55%),radial-gradient(ellipse 60% 50% at 80% 10%,rgba(130,60,255,.38),transparent 55%),radial-gradient(ellipse 50% 40% at 50% 50%,rgba(30,10,80,.8),transparent 70%),linear-gradient(160deg,#06091c 0%,#0b0630 40%,#050c1e 100%);pointer-events:none}
 .bg::after{content:"";position:absolute;inset:0;background:radial-gradient(ellipse 30% 20% at 10% 70%,rgba(0,220,255,.22),transparent 50%)}
 .z1{position:relative;z-index:1}
@@ -1879,7 +1899,7 @@ button{font:inherit;color:inherit;border:0;text-align:inherit;cursor:pointer;bac
 .divider{height:1px;background:rgba(255,255,255,.07);margin:0 10px}
 
 /* Page layout */
-.page{display:none;flex:1;min-height:0;padding:5px 8px max(18px, env(safe-area-inset-bottom));flex-direction:column;overflow-y:auto;overflow-x:hidden;scrollbar-width:none;-webkit-overflow-scrolling:touch;scroll-padding-bottom:18px}
+.page{display:none;flex:0 0 auto;min-height:calc(100dvh - 78px);padding:5px 8px max(58px, env(safe-area-inset-bottom));flex-direction:column;overflow:visible;scrollbar-width:none;-webkit-overflow-scrolling:touch;scroll-padding-bottom:58px}
 .page::-webkit-scrollbar{display:none}
 .page.active{display:flex}
 .page-ov{gap:5px}
@@ -2059,6 +2079,14 @@ button.is-pressed{transform:scale(.93)!important;filter:brightness(1.2)}
 .sp-dev-dot{width:4px;height:4px;border-radius:50%;background:rgba(255,255,255,.15);flex-shrink:0;transition:background .2s}
 .sp-device.on .sp-dev-dot{background:#a78bfa;box-shadow:0 0 6px rgba(167,139,250,.6)}
 
+/* Home pulse */
+.pulse-card{padding:9px 10px}
+.pulse-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:5px}
+.pulse-item{min-width:0;border-radius:10px;background:rgba(255,255,255,.055);border:1px solid rgba(255,255,255,.08);padding:7px 6px;text-align:center}
+.pulse-item ha-icon{--mdc-icon-size:17px;color:rgba(255,255,255,.5);margin-bottom:3px}
+.pulse-item b{display:block;font-size:14px;line-height:1;color:rgba(255,255,255,.92);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.pulse-item span{display:block;margin-top:3px;font-size:8px;text-transform:uppercase;letter-spacing:.35px;color:rgba(255,255,255,.38);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+
 /* Room pages */
 .rp-hero{padding:12px}
 .rp-title{font-size:18px;font-weight:200;color:rgba(255,255,255,.85);margin-bottom:2px;letter-spacing:-.5px}
@@ -2107,10 +2135,12 @@ button.is-pressed{transform:scale(.93)!important;filter:brightness(1.2)}
 .en-nodata{display:flex;align-items:center;gap:7px;color:rgba(255,255,255,.42);font-size:11px;padding:2px 0 0;line-height:1.35}
 .en-title-row{display:flex;align-items:center;justify-content:space-between}
 .en-price{font-size:10px;color:rgba(255,255,255,.46);font-weight:800}
-.en-metrics{display:grid;grid-template-columns:1.25fr 1fr 1fr;gap:5px;margin-bottom:5px}
+.en-metrics{display:grid;grid-template-columns:1.35fr 1fr;gap:5px;margin-bottom:5px}
 .en-pill{min-width:0;padding:7px 8px;border-radius:10px;background:rgba(255,255,255,.055);border:1px solid rgba(255,255,255,.08)}
 .en-pill b{display:block;font-size:18px;line-height:1.05;font-weight:700;color:rgba(255,255,255,.94);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.en-pill.live b{font-size:22px;font-weight:500}
+.en-pill.live b{font-size:34px;font-weight:600;letter-spacing:-1.4px}
+.en-pill.total b{font-size:20px}
+.en-pill em{font-style:normal;font-size:16px;color:rgba(255,255,255,.72);margin-left:7px}
 .en-pill small{font-size:10px;color:rgba(255,255,255,.48);font-weight:500}
 .en-pill span{display:block;font-size:9px;color:rgba(255,255,255,.42);margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .en-live-spark{height:22px;margin-top:0;margin-bottom:5px}
