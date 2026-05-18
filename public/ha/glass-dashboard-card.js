@@ -16,6 +16,7 @@ class GlassDashboardCard extends HTMLElement {
     this._camFetching = false;
     this._lastSig = "";
     this._renderDebounce = null;
+    this._scrollByTab = {};
     this._optimistic = new Map();
     this._notice = null;
     this._noticeTimer = null;
@@ -43,9 +44,11 @@ class GlassDashboardCard extends HTMLElement {
       livingTemp:     "sensor.living_room_sensor_temperature",
       livingHumidity: "sensor.living_room_sensor_humidity",
       livingAir:      "sensor.living_room_sensor_air_quality",
+      livingPm25:     "sensor.living_room_sensor_pm2_5",
       bedTemp:        "sensor.bedroom_sensor_temperature",
       bedHumidity:    "sensor.bedroom_sensor_humidity",
       bedAir:         "sensor.bedroom_sensor_air_quality",
+      bedPm25:        "sensor.bedroom_sensor_pm2_5",
       weather:        "weather.buienradar",
       teslaClimate:   "climate.model_3_climate",
       teslaBattery:   "sensor.model_3_battery_level",
@@ -65,6 +68,9 @@ class GlassDashboardCard extends HTMLElement {
       toonDevices:    ["light.pet_feeder_indicator_light","switch.pet_feeder_motion_alarm","switch.pet_feeder_motion_recording","switch.pet_feeder_time_watermark"],
       toonSensors:    ["sensor.poopas_poops_cat_weight","sensor.poopas_poops_excretion_duration","sensor.poopas_poops_excretion_times_day"],
       petFeederCamera:"camera.pet_feeder",
+      archerDown:     "sensor.archer_ax55_download_speed",
+      archerUp:       "sensor.archer_ax55_upload_speed",
+      archerWan:      "binary_sensor.archer_ax55_wan_status",
     };
   }
 
@@ -108,13 +114,14 @@ class GlassDashboardCard extends HTMLElement {
     const e = this.entities;
     const watch = [
       ...e.mainLights, ...e.bedroomLights, ...e.gameLights, ...e.utilityLights, ...e.toonDevices,
-      e.livingTemp, e.livingHumidity, e.livingAir,
-      e.bedTemp, e.bedHumidity, e.bedAir, e.weather,
+      e.livingTemp, e.livingHumidity, e.livingAir, e.livingPm25,
+      e.bedTemp, e.bedHumidity, e.bedAir, e.bedPm25, e.weather,
       e.teslaClimate, e.teslaBattery, e.teslaRange, e.teslaLocation,
       e.teslaSentry, e.teslaInsideTemp,
       e.spotify, e.spotifySpeaker, e.tv, e.petFeederCamera,
       e.p1Power, e.p1Return, e.p1EnergyToday,
       e.vattenfallElectricityPrice, e.vattenfallGasPrice,
+      e.archerDown, e.archerUp, e.archerWan,
     ];
     return watch.filter(Boolean).map(k => {
       const s = this._hass.states?.[k];
@@ -373,9 +380,10 @@ class GlassDashboardCard extends HTMLElement {
     if (!this._hass) return;
     this._historyLoading = true;
     const sensors = [
-      this.entities.livingTemp, this.entities.livingHumidity, this.entities.livingAir,
-      this.entities.bedTemp,    this.entities.bedHumidity,    this.entities.bedAir,
+      this.entities.livingTemp, this.entities.livingHumidity, this.entities.livingAir, this.entities.livingPm25,
+      this.entities.bedTemp,    this.entities.bedHumidity,    this.entities.bedAir,    this.entities.bedPm25,
       this.entities.p1Power,    this.entities.p1Return,      this.entities.p1EnergyToday,
+      this.entities.archerDown, this.entities.archerUp,
     ].filter(Boolean);
     try {
       // Primary: REST API — full response (no minimal_response) so stable sensors
@@ -425,10 +433,6 @@ class GlassDashboardCard extends HTMLElement {
     if (!this._hass?.callWS) return;
     const period = requestedPeriod || "day";
     if (this._energy.loadingPeriods?.has(period)) return;
-    this._energy.loadingPeriods ??= new Set();
-    this._energy.loadingPeriods.add(period);
-    this._energy.loading = true;
-    this.render();
     try {
       // Step 1: Discover which entities HA Energy dashboard is configured to track
       if (!this._energy.prefs) {
@@ -462,6 +466,11 @@ class GlassDashboardCard extends HTMLElement {
       const dayStale = !this._energy.loadedAt["day"] || now - this._energy.loadedAt["day"] > 300000;
       const periodStale = !this._energy.loadedAt[period] || now - this._energy.loadedAt[period] > cacheTtl;
       if (!dayStale && !periodStale && this._energy.stats[period]) return;
+
+      this._energy.loadingPeriods ??= new Set();
+      this._energy.loadingPeriods.add(period);
+      this._energy.loading = true;
+      this.render();
 
       const end = new Date();
 
@@ -542,6 +551,8 @@ class GlassDashboardCard extends HTMLElement {
       sunny:"mdi:weather-sunny", clear:"mdi:weather-night",
       "clear-night":"mdi:weather-night", fog:"mdi:weather-fog",
       snowy:"mdi:weather-snowy", windy:"mdi:weather-windy", hail:"mdi:weather-hail",
+      lightning:"mdi:weather-lightning", "lightning-rainy":"mdi:weather-lightning-rainy",
+      exceptional:"mdi:weather-cloudy-alert",
     };
     return m[state] || "mdi:weather-partly-cloudy";
   }
@@ -573,6 +584,75 @@ class GlassDashboardCard extends HTMLElement {
     if (l.includes("unhealthy")) return "#f87171";
     if (l.includes("hazardous")) return "#c084fc";
     return "#34d399";
+  }
+  pmValue(entity) {
+    const n = Number(this.st(entity, NaN));
+    return Number.isFinite(n) ? n : NaN;
+  }
+  airStatus(labelEntity, pmEntity) {
+    const pm = this.pmValue(pmEntity);
+    const raw = Number.isFinite(pm) ? pm : this.st(labelEntity, "--");
+    const labelRaw = this.st(labelEntity, raw);
+    const aqLbl = this.aqLabel(labelRaw === "--" ? raw : labelRaw);
+    const aqc = this.aqColor(Number.isFinite(pm) ? pm : aqLbl);
+    const valHtml = Number.isFinite(pm)
+      ? `<div class="cv" style="color:${aqc}">${pm.toFixed(0)}<span class="cu" style="color:${aqc}99"> µg/m³</span></div>`
+      : `<div class="cv aq-text" style="color:${aqc}">${aqLbl}</div>`;
+    return { pm, aqLbl, aqc, valHtml };
+  }
+
+  formatRate(entity) {
+    const n = Number(this.st(entity, NaN));
+    if (!Number.isFinite(n)) return "--";
+    const unit = String(this.attr(entity, "unit_of_measurement", "KiB/s"));
+    let mbps = n;
+    if (/kib\/s/i.test(unit)) mbps = n * 8 / 1024;
+    else if (/mib\/s/i.test(unit)) mbps = n * 8;
+    else if (/kb\/s/i.test(unit)) mbps = n * 8 / 1000;
+    else if (/mb\/s/i.test(unit)) mbps = n * 8;
+    return mbps >= 10 ? `${mbps.toFixed(0)} Mbps` : `${mbps.toFixed(1)} Mbps`;
+  }
+
+  supportsColor(entity) {
+    const modes = this.attr(entity, "supported_color_modes", []) || [];
+    return entity?.startsWith("light.") && modes.some(m => ["hs","xy","rgb","rgbw","rgbww"].includes(m));
+  }
+
+  colorCapable(entities) {
+    return this.actionable(entities).filter(entity => this.supportsColor(entity));
+  }
+
+  colorSwatches(target, compact = false) {
+    const swatches = [
+      ["Warm", 38, 68, "#ffb45f"],
+      ["Soft", 48, 22, "#ffe9b8"],
+      ["Pink", 335, 58, "#f472b6"],
+      ["Violet", 262, 60, "#a78bfa"],
+      ["Blue", 210, 72, "#60a5fa"],
+      ["Green", 145, 58, "#34d399"],
+    ];
+    return `<div class="swatches ${compact ? "compact" : ""}">
+      ${swatches.map(([name,h,s,color]) => `<button class="c-swatch" title="${name}" data-color-target="${target}" data-hue="${h}" data-sat="${s}" style="--sw:${color}"></button>`).join("")}
+    </div>`;
+  }
+
+  async setLightColor(target, h, s) {
+    const entities = String(target).includes(",") ? String(target).split(",") : [target];
+    const targets = this.colorCapable(entities);
+    if (!targets.length) return;
+    this.setOptimistic(targets, "on", 5000);
+    this.render();
+    try {
+      await this.service("light", "turn_on", {
+        entity_id: targets,
+        hs_color: [Number(h), Number(s)],
+        brightness_pct: 85,
+      });
+    } catch (err) {
+      targets.forEach(entity => this._optimistic.delete(entity));
+      this.render();
+      console.warn("[GlassDash] set color failed:", err);
+    }
   }
 
   sparkline(entity, color = "rgba(255,170,50,.85)") {
@@ -868,9 +948,33 @@ class GlassDashboardCard extends HTMLElement {
     setTimeout(() => this.render(), 120);
   }
 
+  _saveScroll() {
+    const page = this.shadowRoot?.querySelector(".page.active");
+    if (page) this._scrollByTab[this._tab] = page.scrollTop || 0;
+  }
+
+  _restoreScroll() {
+    const top = this._scrollByTab[this._tab] || 0;
+    if (!top) return;
+    requestAnimationFrame(() => {
+      const page = this.shadowRoot?.querySelector(".page.active");
+      if (page) page.scrollTop = top;
+    });
+  }
+
+  selectTab(id) {
+    if (!id || id === this._tab) return;
+    this._saveScroll();
+    this._tab = id;
+    this._skipNextSave = true;
+    this.render();
+  }
+
   // ── Main Render ───────────────────────────────────────────────────────────────
   render() {
     if (!this._hass) return;
+    if (this._skipNextSave) this._skipNextSave = false;
+    else this._saveScroll();
     const e = this.entities;
 
     const livingOn  = this.anyOn(e.mainLights);
@@ -967,8 +1071,8 @@ class GlassDashboardCard extends HTMLElement {
             </button>
           </div>
         </section>
-        ${this.climateSummary("Living Room · Climate",e.livingTemp,e.livingHumidity,e.livingAir)}
-        ${this.climateSummary("Bedroom · Climate",e.bedTemp,e.bedHumidity,e.bedAir)}
+        ${this.climateSummary("Living Room · Climate",e.livingTemp,e.livingHumidity,e.livingAir,e.livingPm25)}
+        ${this.climateSummary("Bedroom · Climate",e.bedTemp,e.bedHumidity,e.bedAir,e.bedPm25)}
         ${this.energySection()}
       </div>
 
@@ -981,8 +1085,8 @@ class GlassDashboardCard extends HTMLElement {
     ${this.weatherSection(weatherState,weatherTemp,weatherHumidity,weatherWind,weatherFeels,weatherUV,weatherVis)}
   </div>
 
-  ${this.roomPage("liv","Living Room","Kitchen · Dining · TV area",e.mainLights,e.livingTemp,e.livingHumidity,e.livingAir)}
-  ${this.roomPage("bed","Bedroom","Sleep environment",e.bedroomLights,e.bedTemp,e.bedHumidity,e.bedAir)}
+  ${this.roomPage("liv","Living Room","Kitchen · Dining · TV area",e.mainLights,e.livingTemp,e.livingHumidity,e.livingAir,e.livingPm25)}
+  ${this.roomPage("bed","Bedroom","Sleep environment",e.bedroomLights,e.bedTemp,e.bedHumidity,e.bedAir,e.bedPm25)}
   ${this.roomPage("game","Game Room","Office · Gaming",e.gameLights)}
   ${this.toonPage(camSrc)}
   ${this.roomPage("util","Utility","Toilet · Hallway/Door",e.utilityLights)}
@@ -1004,6 +1108,7 @@ class GlassDashboardCard extends HTMLElement {
     this.updateClock();
     this.bindEvents();
     if (this._tab === "toon") setTimeout(() => this.updateCamera(), 80);
+    this._restoreScroll();
   }
 
   // ── Events ────────────────────────────────────────────────────────────────────
@@ -1021,7 +1126,7 @@ class GlassDashboardCard extends HTMLElement {
     });
 
     this.shadowRoot.querySelectorAll("[data-tab]").forEach(btn =>
-      btn.addEventListener("click", () => { this._tab = btn.dataset.tab; this.render(); }));
+      btn.addEventListener("click", () => this.selectTab(btn.dataset.tab)));
 
     this.shadowRoot.querySelectorAll("[data-room]").forEach(btn => {
       const map = { main:this.entities.mainLights, bedroom:this.entities.bedroomLights, game:this.entities.gameLights, utility:this.entities.utilityLights };
@@ -1045,6 +1150,13 @@ class GlassDashboardCard extends HTMLElement {
           const brightness = Math.round(Number(slider.value) / 100 * 255);
           this.service("light","turn_on",{ entity_id: entity, brightness });
         }, 200);
+      });
+    });
+
+    this.shadowRoot.querySelectorAll("[data-color-target]").forEach(btn => {
+      btn.addEventListener("click", e => {
+        e.stopPropagation();
+        this.setLightColor(btn.dataset.colorTarget, btn.dataset.hue, btn.dataset.sat);
       });
     });
 
@@ -1123,20 +1235,8 @@ class GlassDashboardCard extends HTMLElement {
     </button>`;
   }
 
-  aqDisplay(rawAq) {
-    const aqLbl = this.aqLabel(rawAq);
-    const aqc   = this.aqColor(rawAq);
-    const n     = Number(rawAq);
-    const isNum = Number.isFinite(n);
-    const valHtml = isNum
-      ? `<div class="cv" style="color:${aqc}">${n.toFixed(0)}<span class="cu" style="color:${aqc}99"> µg/m³</span></div>`
-      : `<div class="cv aq-text" style="color:${aqc}">${aqLbl}</div>`;
-    return { aqLbl, aqc, valHtml };
-  }
-
-  climateSummary(title, temp, humidity, air) {
-    const rawAq = this.st(air, "--");
-    const { aqLbl, aqc, valHtml } = this.aqDisplay(rawAq);
+  climateSummary(title, temp, humidity, air, pm25) {
+    const { aqLbl, aqc, valHtml } = this.airStatus(air, pm25);
     return `<section class="gl block">
       <div class="slbl">${title}</div>
       <div class="clim-row">
@@ -1153,9 +1253,9 @@ class GlassDashboardCard extends HTMLElement {
         </div>
         <div class="clim-sep"></div>
         <div class="clim-col aq-col">
-          <div class="aq-dot" style="background:${aqc};box-shadow:0 0 9px ${aqc}99"></div>
           ${valHtml}
           <div class="cl" style="color:${aqc}bb">${aqLbl} · Air</div>
+          <div class="spark-wrap aq-spark">${this.sparkline(pm25, aqc)}</div>
         </div>
       </div>
     </section>`;
@@ -1202,15 +1302,17 @@ class GlassDashboardCard extends HTMLElement {
         if (arr.length) hasCostStat = true;
       }
     }
-    const todayCost = hasCostStat
-      ? todayCostStat.toFixed(2)
-      : (todayKwh * priceNow).toFixed(2);
-
     // Chart buckets for selected period
     const period      = this._energy.period;
     const periodStats = this._energy.stats[period];
     const buckets     = this._buildEnergyBuckets(periodStats, consumptionIds);
     const periodLoading = this._energy.loadingPeriods?.has(period);
+    const periodKwh = buckets.reduce((sum, b) => sum + b.kwh, 0);
+    const peakKwh = buckets.length ? Math.max(...buckets.map(b => b.kwh)) : 0;
+    const avgKwh = buckets.length ? periodKwh / buckets.length : 0;
+    const shownKwh = period === "day" ? todayKwh : periodKwh;
+    const shownCost = (period === "day" && hasCostStat) ? todayCostStat : shownKwh * priceNow;
+    const periodLabel = period === "day" ? "today" : period;
 
     const hasEnergyConfig = consumptionIds.length > 0;
     const tabs = ["day","week","month","year"].map(p =>
@@ -1218,22 +1320,31 @@ class GlassDashboardCard extends HTMLElement {
     ).join("");
 
     return `<section class="gl block en-section">
-      <div class="slbl">Energy</div>
-      <div class="en-live-row">
-        <div class="en-live-block">
-          <div class="en-live-val" style="color:${powerColor}">${liveVal}</div>
-          <div class="en-live-lbl">${liveLabel}</div>
-          <div class="en-cost-now">${liveCostTxt} · ${priceTxt}</div>
-          <div class="spark-wrap" style="margin-top:4px">${this.sparkline(e.p1Power, powerColor)}</div>
+      <div class="en-title-row">
+        <div class="slbl">Energy</div>
+        <div class="en-price">${priceTxt}</div>
+      </div>
+      <div class="en-metrics">
+        <div class="en-pill live">
+          <b style="color:${powerColor}">${liveVal}</b>
+          <span>${liveLabel} · ${liveCostTxt}</span>
         </div>
-        <div class="en-divider"></div>
-        <div class="en-today-block">
-          <div class="en-today-val">${todayKwh > 0 ? todayKwh.toFixed(2) : "--"}<span class="en-unit"> kWh</span></div>
-          <div class="en-today-cost">${todayKwh > 0 ? "€"+todayCost+" today" : this._energy.loadingPeriods?.has("day") ? "Loading…" : "Waiting for data"}</div>
+        <div class="en-pill">
+          <b>${shownKwh > 0 ? shownKwh.toFixed(2) : "--"}<small> kWh</small></b>
+          <span>${periodLabel} usage</span>
+        </div>
+        <div class="en-pill">
+          <b>${shownKwh > 0 ? "€"+shownCost.toFixed(2) : "€--"}</b>
+          <span>spent</span>
         </div>
       </div>
+      <div class="spark-wrap en-live-spark">${this.sparkline(e.p1Power, powerColor)}</div>
       ${hasEnergyConfig ? `<div class="en-tabs">${tabs}</div>
-      <div class="en-chart">${buckets.length ? this._energyBars(buckets) : `<div class="en-loading">${periodLoading ? "Loading…" : "No usage data yet"}</div>`}</div>` : ""}
+      <div class="en-chart">${buckets.length ? this._energyBars(buckets) : `<div class="en-loading">${periodLoading ? "Loading…" : "No usage data yet"}</div>`}</div>
+      <div class="en-foot">
+        <span>Avg ${avgKwh > 0 ? avgKwh.toFixed(2) : "--"} kWh</span>
+        <span>Peak ${peakKwh > 0 ? peakKwh.toFixed(2) : "--"} kWh</span>
+      </div>` : ""}
     </section>`;
   }
 
@@ -1288,13 +1399,17 @@ class GlassDashboardCard extends HTMLElement {
   _energyBars(buckets) {
     if (!buckets.length) return "";
     const maxV = this._robustEnergyMax(buckets.map(b => b.kwh));
-    const W = 280, H = 50;
+    const clean = buckets.map(b => b.kwh).filter(v => Number.isFinite(v) && v > 0);
+    const minV = clean.length > 3 ? Math.min(...clean) : 0;
+    const spread = Math.max(maxV - minV, maxV * 0.2, 0.001);
+    const W = 280, H = 54;
     const n = buckets.length;
     const step = W / n;
     const barW = Math.max(1.5, step * 0.72);
     const nowIso = new Date().toISOString().slice(0, 13);
     const bars = buckets.map((b, i) => {
-      const bh  = Math.max(1.5, (Math.min(b.kwh, maxV) / maxV) * H);
+      const norm = Math.max(0, Math.min(1, (Math.min(b.kwh, maxV) - minV) / spread));
+      const bh  = Math.max(5, 10 + norm * (H - 10));
       const x   = i * step + (step - barW) / 2;
       const y   = H - bh;
       const cur = this._bucketHourKey(b.start) === nowIso || i === buckets.length - 1;
@@ -1483,8 +1598,11 @@ class GlassDashboardCard extends HTMLElement {
       fog:           { bg:"rgba(148,163,184,.12)", border:"rgba(148,163,184,.18)", ico:"rgba(255,255,255,.45)" },
       windy:         { bg:"rgba(167,139,250,.14)", border:"rgba(167,139,250,.24)", ico:"#a78bfa" },
       hail:          { bg:"rgba(100,116,139,.14)", border:"rgba(100,116,139,.2)",  ico:"rgba(255,255,255,.55)" },
+      lightning:     { bg:"rgba(88,28,135,.2)",    border:"rgba(250,204,21,.26)",  ico:"#fde047" },
+      "lightning-rainy": { bg:"rgba(30,64,175,.22)", border:"rgba(250,204,21,.28)", ico:"#fde047" },
     };
     const acc = condAccent[state] || condAccent.partlycloudy;
+    const mood = `wx-${String(state || "partlycloudy").replace(/[^a-z0-9-]/gi,"")}`;
 
     const days = (this._forecast||[]).slice(0,5);
     const forecastHTML = days.length
@@ -1512,7 +1630,8 @@ class GlassDashboardCard extends HTMLElement {
       vis!=null   ? {icon:"mdi:eye-outline",         val:`${Math.round(vis)} km`, lbl:"Visibility"} : null,
     ].filter(Boolean);
 
-    return `<section class="gl wx-big" style="background:${acc.bg};border-color:${acc.border}">
+    return `<section class="gl wx-big ${mood}" style="background:${acc.bg};border-color:${acc.border}">
+      <div class="wx-sky"><span></span><span></span><span></span></div>
       <div class="slbl" style="color:rgba(255,255,255,.42)">Weather · Outside</div>
       <div class="wx-hero">
         <div class="wx-hero-left">
@@ -1537,6 +1656,7 @@ class GlassDashboardCard extends HTMLElement {
     const name = (this.attr(entity,"friendly_name",null) || entity.split(".")[1]?.replace(/_/g," ") || entity);
     const on   = this.isOn(entity);
     const isLt = entity.startsWith("light.");
+    const canColor = this.isAvailable(entity) && this.supportsColor(entity);
     const braw = isLt ? this.attr(entity,"brightness",null) : null;
     const bPct = braw !== null ? Math.max(1, Math.round(braw / 255 * 100)) : (on ? 100 : null);
     const icon = isLt ? (on?"mdi:lightbulb":"mdi:lightbulb-outline")
@@ -1558,12 +1678,12 @@ class GlassDashboardCard extends HTMLElement {
         <input type="range" class="li-slider" min="1" max="100" value="${bPct}" data-brightness-entity="${entity}">
         <ha-icon icon="mdi:brightness-7" style="--mdc-icon-size:12px;opacity:.7;color:#fff;flex-shrink:0"></ha-icon>
       </div>` : ""}
+      ${canColor ? `<div class="li-color-wrap">${this.colorSwatches(entity, true)}</div>` : ""}
     </div>`;
   }
 
-  climateDetail(temp, humidity, air) {
-    const rawAq = this.st(air, "--");
-    const { aqLbl, aqc, valHtml } = this.aqDisplay(rawAq);
+  climateDetail(temp, humidity, air, pm25) {
+    const { aqLbl, aqc, valHtml } = this.airStatus(air, pm25);
     return `<section class="gl block">
       <div class="slbl">Climate</div>
       <div class="clim-row">
@@ -1580,19 +1700,53 @@ class GlassDashboardCard extends HTMLElement {
         </div>
         <div class="clim-sep"></div>
         <div class="clim-col aq-col">
-          <div class="aq-dot" style="background:${aqc};box-shadow:0 0 9px ${aqc}99"></div>
           ${valHtml}
           <div class="cl" style="color:${aqc}bb">${aqLbl} · Air</div>
+          <div class="spark-wrap aq-spark">${this.sparkline(pm25, aqc)}</div>
         </div>
       </div>
     </section>`;
   }
 
-  roomPage(id, title, sub, entities, temp, humidity, air) {
+  roomPalette(entities) {
+    const targets = this.colorCapable(entities);
+    if (!targets.length) return "";
+    return `<div class="room-palette">
+      <div class="rp-palette-label">Room colour</div>
+      ${this.colorSwatches(targets.join(","))}
+    </div>`;
+  }
+
+  utilityNetwork() {
+    const e = this.entities;
+    const wan = this.isOn(e.archerWan);
+    return `<section class="gl block net-card">
+      <div class="slbl">Archer · Wi-Fi speed</div>
+      <div class="net-head">
+        <div class="net-status ${wan ? "on" : ""}"><span></span>${wan ? "WAN online" : "WAN offline"}</div>
+      </div>
+      <div class="net-grid">
+        <div class="net-metric">
+          <ha-icon icon="mdi:download"></ha-icon>
+          <div><b>${this.formatRate(e.archerDown)}</b><span>Download</span></div>
+          <div class="spark-wrap">${this.sparkline(e.archerDown, "rgba(96,165,250,.9)")}</div>
+        </div>
+        <div class="net-metric">
+          <ha-icon icon="mdi:upload"></ha-icon>
+          <div><b>${this.formatRate(e.archerUp)}</b><span>Upload</span></div>
+          <div class="spark-wrap">${this.sparkline(e.archerUp, "rgba(52,211,153,.9)")}</div>
+        </div>
+      </div>
+    </section>`;
+  }
+
+  roomPage(id, title, sub, entities, temp, humidity, air, pm25) {
     const rk = id==="liv"?"main":id==="bed"?"bedroom":id==="game"?"game":"utility";
-    const climate = temp
-      ? `<div class="col">${this.climateDetail(temp,humidity,air)}</div>`
-      : `<div class="col">${this.sceneList(title)}</div>`;
+    const sideContent = temp
+      ? `<div class="col">${this.climateDetail(temp,humidity,air,pm25)}</div>`
+      : id === "util"
+        ? `<div class="col">${this.utilityNetwork()}${this.sceneList(title)}</div>`
+        : `<div class="col">${this.sceneList(title)}</div>`;
     return `<div class="page ${this._tab===id?"active":""} z1">
       <div class="g2">
         <div class="col">
@@ -1604,13 +1758,14 @@ class GlassDashboardCard extends HTMLElement {
               <div class="bt-label">All Lights · ${this.countOn(entities)} on</div>
               <div class="sw"></div>
             </button>
+            ${this.roomPalette(entities)}
           </section>
           <section class="gl block">
             <div class="slbl">Lights</div>
             <div class="light-list">${entities.map(en=>this.lightItem(en)).join("")}</div>
           </section>
         </div>
-        ${climate}
+        ${sideContent}
       </div>
     </div>`;
   }
@@ -1768,9 +1923,9 @@ button.is-pressed{transform:scale(.93)!important;filter:brightness(1.2)}
 .spark-wrap{width:100%;height:25px;margin-top:4px;overflow:hidden}
 .spark{width:100%;height:25px;display:block}
 .spark-empty{width:100%;height:25px;border-bottom:1px solid rgba(255,255,255,.06)}
-.aq-dot{width:10px;height:10px;border-radius:50%;flex-shrink:0;animation:aq-breathe 2.5s ease-in-out infinite;margin-bottom:4px}
+.aq-spark{height:24px;margin-top:5px}
+.aq-spark .spark{height:24px}
 .aq-text{font-size:20px!important;font-weight:800!important;text-transform:capitalize}
-@keyframes aq-breathe{0%,100%{opacity:1;transform:scale(1)}50%{opacity:.6;transform:scale(.82)}}
 
 /* Tesla card — Tesla-app style */
 .tc{overflow:hidden;padding:0}
@@ -1834,7 +1989,18 @@ button.is-pressed{transform:scale(.93)!important;filter:brightness(1.2)}
 @keyframes sentry-pulse{0%,100%{opacity:1;transform:scale(1)}50%{opacity:.45;transform:scale(.72)}}
 
 /* Weather */
-.wx-big{padding:9px 12px;transition:background .4s,border-color .4s}
+.wx-big{padding:9px 12px;transition:background .4s,border-color .4s;position:relative;overflow:hidden}
+.wx-big>*:not(.wx-sky){position:relative;z-index:1}
+.wx-sky{position:absolute;inset:0;z-index:0;pointer-events:none;opacity:.9}
+.wx-sky span{position:absolute;display:block}
+.wx-cloudy .wx-sky span,.wx-partlycloudy .wx-sky span,.wx-rainy .wx-sky span,.wx-pouring .wx-sky span,.wx-lightning-rainy .wx-sky span{width:170px;height:70px;border-radius:999px;background:rgba(255,255,255,.09);filter:blur(12px)}
+.wx-cloudy .wx-sky span:nth-child(1),.wx-partlycloudy .wx-sky span:nth-child(1),.wx-rainy .wx-sky span:nth-child(1),.wx-pouring .wx-sky span:nth-child(1),.wx-lightning-rainy .wx-sky span:nth-child(1){top:12px;right:7%;transform:rotate(-8deg)}
+.wx-cloudy .wx-sky span:nth-child(2),.wx-partlycloudy .wx-sky span:nth-child(2),.wx-rainy .wx-sky span:nth-child(2),.wx-pouring .wx-sky span:nth-child(2),.wx-lightning-rainy .wx-sky span:nth-child(2){top:58px;left:18%;width:210px;opacity:.55}
+.wx-sunny .wx-sky::before{content:"";position:absolute;left:4%;top:6%;width:150px;height:150px;border-radius:50%;background:radial-gradient(circle,rgba(251,191,36,.32),rgba(251,191,36,.08) 46%,transparent 70%);filter:blur(2px)}
+.wx-clear-night .wx-sky::before,.wx-clear .wx-sky::before{content:"";position:absolute;right:8%;top:10%;width:95px;height:95px;border-radius:50%;background:radial-gradient(circle,rgba(199,210,254,.22),rgba(129,140,248,.05) 48%,transparent 72%)}
+.wx-rainy .wx-sky::after,.wx-pouring .wx-sky::after,.wx-lightning-rainy .wx-sky::after{content:"";position:absolute;inset:0;background:repeating-linear-gradient(105deg,transparent 0 18px,rgba(96,165,250,.22) 19px 21px,transparent 22px 34px);opacity:.32;transform:translateX(-20px)}
+.wx-lightning .wx-sky::before,.wx-lightning-rainy .wx-sky::before{content:"";position:absolute;right:18%;top:10%;width:80px;height:120px;background:linear-gradient(140deg,transparent 0 38%,rgba(253,224,71,.55) 39% 43%,transparent 44% 100%);filter:drop-shadow(0 0 16px rgba(253,224,71,.55))}
+.wx-fog .wx-sky::after{content:"";position:absolute;inset:12px;background:repeating-linear-gradient(0deg,transparent 0 17px,rgba(255,255,255,.10) 18px 21px);filter:blur(3px);opacity:.6}
 .wx-hero{display:flex;align-items:center;gap:14px;margin-bottom:7px}
 .wx-hero-left{display:flex;align-items:center;gap:11px;flex-shrink:0}
 .wx-ico-big{--mdc-icon-size:54px;transition:color .4s}
@@ -1927,36 +2093,54 @@ button.is-pressed{transform:scale(.93)!important;filter:brightness(1.2)}
 .li-slider{-webkit-appearance:none;appearance:none;flex:1;height:3px;border-radius:3px;background:rgba(167,139,250,.25);outline:none;cursor:pointer}
 .li-slider::-webkit-slider-thumb{-webkit-appearance:none;width:15px;height:15px;border-radius:50%;background:rgba(200,185,255,.92);cursor:pointer;box-shadow:0 1px 5px rgba(0,0,0,.35)}
 .li-slider::-moz-range-thumb{width:15px;height:15px;border-radius:50%;background:rgba(200,185,255,.92);cursor:pointer;border:0}
+.li-color-wrap{padding:0 11px 9px}
+.room-palette{margin-top:9px;padding-top:8px;border-top:1px solid rgba(255,255,255,.07);display:flex;align-items:center;justify-content:space-between;gap:8px}
+.rp-palette-label{font-size:9px;font-weight:800;letter-spacing:.6px;text-transform:uppercase;color:rgba(255,255,255,.34)}
+.swatches{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+.swatches.compact{gap:5px}
+.c-swatch{width:22px;height:22px;border-radius:50%;background:var(--sw);border:2px solid rgba(255,255,255,.22)!important;box-shadow:0 0 0 1px rgba(0,0,0,.18),0 5px 12px rgba(0,0,0,.20);transition:transform .08s,filter .12s,box-shadow .12s}
+.swatches.compact .c-swatch{width:18px;height:18px}
+.c-swatch:hover{filter:brightness(1.12);box-shadow:0 0 0 1px rgba(255,255,255,.22),0 0 13px rgba(255,255,255,.22)}
 
 /* Energy section */
 .en-section{padding:9px}
 .en-nodata{display:flex;align-items:center;gap:7px;color:rgba(255,255,255,.42);font-size:11px;padding:2px 0 0;line-height:1.35}
-.en-live-row{display:flex;align-items:stretch;gap:12px;margin-bottom:7px;width:100%}
-.en-live-block{flex:1;min-width:0}
-.en-live-val{font-size:36px;font-weight:300;letter-spacing:-1px;line-height:1.05;transition:color .3s}
-.en-live-lbl{font-size:10px;color:rgba(255,255,255,.43);text-transform:uppercase;letter-spacing:.6px;margin-top:1px}
-.en-cost-now{font-size:11px;color:rgba(255,255,255,.58);margin-top:2px;font-weight:700}
-.en-divider{width:1px;height:38px;background:rgba(255,255,255,.1);flex-shrink:0}
-.en-today-block{flex:1;min-width:0}
-.en-today-val{font-size:24px;font-weight:300;color:rgba(255,255,255,.94);letter-spacing:-.6px;line-height:1}
+.en-title-row{display:flex;align-items:center;justify-content:space-between}
+.en-price{font-size:10px;color:rgba(255,255,255,.46);font-weight:800}
+.en-metrics{display:grid;grid-template-columns:1.25fr 1fr 1fr;gap:5px;margin-bottom:5px}
+.en-pill{min-width:0;padding:7px 8px;border-radius:10px;background:rgba(255,255,255,.055);border:1px solid rgba(255,255,255,.08)}
+.en-pill b{display:block;font-size:18px;line-height:1.05;font-weight:700;color:rgba(255,255,255,.94);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.en-pill.live b{font-size:22px;font-weight:500}
+.en-pill small{font-size:10px;color:rgba(255,255,255,.48);font-weight:500}
+.en-pill span{display:block;font-size:9px;color:rgba(255,255,255,.42);margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.en-live-spark{height:22px;margin-top:0;margin-bottom:5px}
+.en-live-spark .spark{height:22px}
 .en-unit{font-size:12px;color:rgba(255,255,255,.47);font-weight:400}
-.en-today-cost{font-size:11px;color:rgba(255,255,255,.48);margin-top:2px}
-.en-tabs{display:flex;gap:4px;margin-bottom:8px}
+.en-tabs{display:flex;gap:4px;margin-bottom:6px}
 .en-tab{flex:1;padding:4px 2px;border-radius:8px;font-size:9px;font-weight:700;color:rgba(255,255,255,.4);background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.07)!important;transition:all .15s;text-transform:capitalize;text-align:center;cursor:pointer}
 .en-tab:hover{background:rgba(255,255,255,.09);color:rgba(255,255,255,.65)}
 .en-tab.active{background:rgba(167,139,250,.18);border-color:rgba(167,139,250,.35)!important;color:rgba(200,185,255,.92)}
 .en-tab.loading{position:relative;color:rgba(255,255,255,.72)}
 .en-tab.loading::after{content:"";position:absolute;right:7px;top:50%;width:5px;height:5px;margin-top:-2.5px;border-radius:50%;background:#a78bfa;box-shadow:0 0 8px rgba(167,139,250,.7);animation:sentry-pulse 1.15s ease-in-out infinite}
-.en-chart{width:100%;height:48px;overflow:hidden}
-.en-bar-stack{height:48px;display:flex;flex-direction:column;gap:3px}
-.en-svg{width:100%;height:34px;display:block}
+.en-chart{width:100%;height:62px;overflow:hidden}
+.en-bar-stack{height:62px;display:flex;flex-direction:column;gap:3px}
+.en-svg{width:100%;height:48px;display:block}
 .en-axis{display:flex;width:100%;height:11px;align-items:flex-start;overflow:hidden}
 .en-axis span{flex:1;min-width:0;text-align:center;font-size:9px;line-height:1;color:rgba(255,255,255,.52);font-weight:700;letter-spacing:0;white-space:nowrap}
-.en-loading{height:48px;display:flex;align-items:center;justify-content:center;font-size:11px;color:rgba(255,255,255,.28)}
+.en-foot{display:flex;justify-content:space-between;margin-top:3px;font-size:9px;color:rgba(255,255,255,.38)}
+.en-loading{height:62px;display:flex;align-items:center;justify-content:center;font-size:11px;color:rgba(255,255,255,.28)}
 
-/* Climate detail */
-.cd-full{grid-column:span 2;padding:7px 10px;display:flex;align-items:center;justify-content:space-between;color:rgba(255,255,255,.38);font-size:10px;border-radius:10px;background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.07)}
-.cd-aq-val{font-size:13px;font-weight:700;text-transform:capitalize}
+/* Network */
+.net-card{position:relative;overflow:hidden}
+.net-head{display:flex;justify-content:flex-end;margin-top:-22px;margin-bottom:6px}
+.net-status{display:flex;align-items:center;gap:5px;font-size:9px;font-weight:800;color:rgba(255,255,255,.42);text-transform:uppercase;letter-spacing:.4px}
+.net-status span{width:7px;height:7px;border-radius:50%;background:#f87171;box-shadow:0 0 8px rgba(248,113,113,.6)}
+.net-status.on span{background:#34d399;box-shadow:0 0 8px rgba(52,211,153,.65)}
+.net-grid{display:grid;grid-template-columns:1fr 1fr;gap:6px}
+.net-metric{padding:8px;border-radius:11px;background:rgba(255,255,255,.055);border:1px solid rgba(255,255,255,.08);min-width:0}
+.net-metric ha-icon{--mdc-icon-size:17px;color:rgba(255,255,255,.55);float:right}
+.net-metric b{display:block;font-size:18px;color:rgba(255,255,255,.92);line-height:1.05}
+.net-metric span{display:block;font-size:9px;color:rgba(255,255,255,.42);text-transform:uppercase;letter-spacing:.5px;margin-top:2px}
 
 /* Scenes */
 .scene-item{width:100%;display:flex;align-items:center;justify-content:space-between;padding:8px 11px;border-radius:10px;border:1px solid rgba(255,255,255,.07)!important;background:rgba(255,255,255,.04);transition:all .18s;margin-bottom:5px}
