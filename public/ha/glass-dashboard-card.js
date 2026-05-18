@@ -671,13 +671,13 @@ class GlassDashboardCard extends HTMLElement {
     if (!targets.length || !/^#[0-9a-f]{6}$/i.test(String(hex))) return;
     const rgb = [1,3,5].map(i => parseInt(hex.slice(i, i + 2), 16));
     this.setOptimistic(targets, "on", 5000);
-    this.render();
     try {
       await this.service("light", "turn_on", {
         entity_id: targets,
         rgb_color: rgb,
         brightness_pct: 85,
       });
+      window.setTimeout(() => this.render(), 650);
     } catch (err) {
       targets.forEach(entity => this._optimistic.delete(entity));
       this.render();
@@ -1952,7 +1952,7 @@ button{font:inherit;color:inherit;border:0;text-align:inherit;cursor:pointer;bac
 .block{padding:9px}
 
 /* Topbar */
-.topbar{display:flex;align-items:center;justify-content:space-between;padding:8px 14px 4px;z-index:50;isolation:isolate;flex-shrink:0}
+.topbar{display:flex;align-items:center;justify-content:space-between;padding:max(28px,env(safe-area-inset-top)) 14px 4px;z-index:50;isolation:isolate;flex-shrink:0}
 .home-lbl{font-size:15px;font-weight:800;color:rgba(255,255,255,.64);letter-spacing:1.2px;text-transform:uppercase}
 .home-sub{font-size:11px;color:rgba(255,255,255,.38);margin-top:0}
 .topbar-right{display:flex;align-items:center;gap:9px}
@@ -1964,7 +1964,7 @@ button{font:inherit;color:inherit;border:0;text-align:inherit;cursor:pointer;bac
 .fs-btn ha-icon{--mdc-icon-size:16px;color:rgba(255,255,255,.6)}
 
 /* Tabs */
-.tabs{display:flex;gap:4px;padding:0 10px 7px;overflow-x:auto;scrollbar-width:none;position:relative;z-index:45;flex-shrink:0;background:linear-gradient(180deg,rgba(6,8,24,.64),rgba(6,8,24,.18))}
+.tabs{display:flex;gap:4px;padding:0 10px 7px;overflow-x:auto;scrollbar-width:none;position:relative;z-index:45;flex-shrink:0;background:transparent}
 .tabs::-webkit-scrollbar{display:none}
 .tab{flex-shrink:0;display:flex;align-items:center;gap:6px;padding:5px 11px;border-radius:18px;font-size:12px;font-weight:800;color:rgba(255,255,255,.52);border:1px solid rgba(255,255,255,.06);background:rgba(255,255,255,.05);transition:all .18s,transform .08s;white-space:nowrap}
 .tab ha-icon{--mdc-icon-size:15px;opacity:.7}
