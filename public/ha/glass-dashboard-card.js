@@ -1683,20 +1683,20 @@ class GlassDashboardCard extends HTMLElement {
           <div class="tc-range">${range}</div>
         </div>
         <div class="tc-bar"><div class="tc-fill" style="width:${pct}%;background:${battColor}"></div></div>
-        <div class="tc-charge ${chargeClass}">
+        ${charge?.active ? `<div class="tc-charge charging">
           <div class="tc-charge-head">
             <div class="tc-charge-title">
-              <ha-icon icon="${charge?.active ? "mdi:lightning-bolt" : charge?.plugged ? "mdi:power-plug" : "mdi:power-plug-off"}"></ha-icon>
-              <span>${charge?.stateLabel || "Charge unknown"}</span>
+              <ha-icon icon="mdi:lightning-bolt"></ha-icon>
+              <span>${charge.stateLabel || "Charging"}</span>
             </div>
-            <div class="tc-charge-time">${charge?.time || "--"}</div>
+            <div class="tc-charge-time">${charge.time || "--"}</div>
           </div>
           <div class="tc-charge-grid">
-            <div><b>${charge?.timeShort || "--"}</b><span>to 100%</span></div>
-            <div><b>${charge?.power || "-- kW"}</b><span>power</span></div>
+            <div><b>${charge.timeShort || "--"}</b><span>to 100%</span></div>
+            <div><b>${charge.power || "-- kW"}</b><span>power</span></div>
           </div>
           <div class="tc-charge-track"><span></span><span></span><span></span></div>
-        </div>
+        </div>` : ""}
         <div class="tc-clim-row">
           <div class="tc-clim-left">
             <ha-icon class="tc-clim-icon ${clim.mode}" icon="${clim.icon}"></ha-icon>
