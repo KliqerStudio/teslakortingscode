@@ -618,6 +618,10 @@ class GlassDashboardCard extends HTMLElement {
     return entity?.startsWith("light.") && modes.some(m => ["hs","xy","rgb","rgbw","rgbww"].includes(m));
   }
 
+  roomLightTargets(entities) {
+    return this.actionable(entities).filter(entity => entity.startsWith("light."));
+  }
+
   colorCapable(entities) {
     return this.actionable(entities).filter(entity => this.supportsColor(entity));
   }
@@ -626,6 +630,7 @@ class GlassDashboardCard extends HTMLElement {
     const swatches = [
       ["Warm", 38, 68, "#ffb45f"],
       ["Pumpkin", 28, 82, "#f97316"],
+      ["Red", 0, 82, "#ef4444"],
       ["Soft", 48, 22, "#ffe9b8"],
       ["Pink", 335, 58, "#f472b6"],
       ["Violet", 262, 60, "#a78bfa"],
@@ -634,6 +639,10 @@ class GlassDashboardCard extends HTMLElement {
     ];
     return `<div class="swatches ${compact ? "compact" : ""}">
       ${swatches.map(([name,h,s,color]) => `<button class="c-swatch" title="${name}" data-color-target="${target}" data-hue="${h}" data-sat="${s}" style="--sw:${color}"></button>`).join("")}
+      <label class="c-picker" title="Custom colour">
+        <ha-icon icon="mdi:palette-outline"></ha-icon>
+        <input type="color" value="#a78bfa" data-color-picker="${target}">
+      </label>
     </div>`;
   }
 
@@ -653,6 +662,42 @@ class GlassDashboardCard extends HTMLElement {
       targets.forEach(entity => this._optimistic.delete(entity));
       this.render();
       console.warn("[GlassDash] set color failed:", err);
+    }
+  }
+
+  async setLightRgb(target, hex) {
+    const entities = String(target).includes(",") ? String(target).split(",") : [target];
+    const targets = this.colorCapable(entities);
+    if (!targets.length || !/^#[0-9a-f]{6}$/i.test(String(hex))) return;
+    const rgb = [1,3,5].map(i => parseInt(hex.slice(i, i + 2), 16));
+    this.setOptimistic(targets, "on", 5000);
+    this.render();
+    try {
+      await this.service("light", "turn_on", {
+        entity_id: targets,
+        rgb_color: rgb,
+        brightness_pct: 85,
+      });
+    } catch (err) {
+      targets.forEach(entity => this._optimistic.delete(entity));
+      this.render();
+      console.warn("[GlassDash] set RGB failed:", err);
+    }
+  }
+
+  async setRoomBrightness(target, value) {
+    const entities = String(target).split(",");
+    const targets = this.roomLightTargets(entities);
+    if (!targets.length) return;
+    const brightness_pct = Math.max(1, Math.min(100, Math.round(Number(value) || 1)));
+    this.setOptimistic(targets, "on", 5000);
+    this.render();
+    try {
+      await this.service("light", "turn_on", { entity_id: targets, brightness_pct });
+    } catch (err) {
+      targets.forEach(entity => this._optimistic.delete(entity));
+      this.render();
+      console.warn("[GlassDash] room brightness failed:", err);
     }
   }
 
@@ -1086,7 +1131,7 @@ class GlassDashboardCard extends HTMLElement {
       <div class="col">
         ${this.teslaCard(batteryRaw,range,teslaPlace,climOn,targetTemp)}
         ${this.spotifySection(spotifyPic,spotifyTitle,spotifyArtist,spotifyAlbum,spotifyActive,spotifyPlaying,curPos,durSec,spProg,volPct)}
-        ${this.pulseSection(weatherTemp)}
+        ${this.pulseSection()}
       </div>
     </div>
     ${this.weatherSection(weatherState,weatherTemp,weatherHumidity,weatherWind,weatherFeels,weatherUV,weatherVis)}
@@ -1164,6 +1209,25 @@ class GlassDashboardCard extends HTMLElement {
       btn.addEventListener("click", e => {
         e.stopPropagation();
         this.setLightColor(btn.dataset.colorTarget, btn.dataset.hue, btn.dataset.sat);
+      });
+    });
+
+    this.shadowRoot.querySelectorAll("[data-color-picker]").forEach(input => {
+      input.addEventListener("click", e => e.stopPropagation());
+      input.addEventListener("change", e => {
+        e.stopPropagation();
+        this.setLightRgb(input.dataset.colorPicker, input.value);
+      });
+    });
+
+    const roomBrightnessTimers = {};
+    this.shadowRoot.querySelectorAll("[data-room-brightness]").forEach(slider => {
+      slider.addEventListener("pointerdown", e => e.stopPropagation());
+      slider.addEventListener("click", e => e.stopPropagation());
+      slider.addEventListener("input", () => {
+        const target = slider.dataset.roomBrightness;
+        clearTimeout(roomBrightnessTimers[target]);
+        roomBrightnessTimers[target] = setTimeout(() => this.setRoomBrightness(target, slider.value), 220);
       });
     });
 
@@ -1587,17 +1651,18 @@ class GlassDashboardCard extends HTMLElement {
     </section>`;
   }
 
-  pulseSection(weatherTemp) {
+  pulseSection() {
     const e = this.entities;
     const lightsOn = this.countOn([...e.mainLights, ...e.bedroomLights, ...e.gameLights, ...e.utilityLights]);
     const livingAir = this.airStatus(e.livingAir, e.livingPm25);
     const bedAir = this.airStatus(e.bedAir, e.bedPm25);
     const bestAir = [livingAir, bedAir].every(a => a.aqLbl === "Good") ? "Good" : `${livingAir.aqLbl} / ${bedAir.aqLbl}`;
+    const feederActive = this.anyOn(e.toonDevices);
     return `<section class="gl pulse-card">
       <div class="slbl">Home pulse</div>
       <div class="pulse-grid">
         <div class="pulse-item"><ha-icon icon="mdi:lightbulb-group-outline"></ha-icon><b>${lightsOn}</b><span>lights on</span></div>
-        <div class="pulse-item"><ha-icon icon="mdi:thermometer"></ha-icon><b>${weatherTemp}°</b><span>outside</span></div>
+        <div class="pulse-item"><ha-icon icon="mdi:food-drumstick-outline"></ha-icon><b>${feederActive ? "Active" : "Standby"}</b><span>pet feeder</span></div>
         <div class="pulse-item"><ha-icon icon="mdi:download-network-outline"></ha-icon><b>${this.formatRate(e.archerDown)}</b><span>internet</span></div>
         <div class="pulse-item"><ha-icon icon="mdi:blur"></ha-icon><b>${bestAir}</b><span>air quality</span></div>
       </div>
@@ -1730,10 +1795,20 @@ class GlassDashboardCard extends HTMLElement {
 
   roomPalette(entities) {
     const targets = this.colorCapable(entities);
-    if (!targets.length) return "";
+    const lights = this.roomLightTargets(entities);
+    if (!targets.length && !lights.length) return "";
+    const avgBrightness = lights.length
+      ? Math.round(lights.reduce((sum, entity) => {
+          const b = Number(this.attr(entity, "brightness", this.isOn(entity) ? 255 : 0));
+          return sum + (Number.isFinite(b) ? b : 0);
+        }, 0) / lights.length / 255 * 100)
+      : 0;
     return `<div class="room-palette">
-      <div class="rp-palette-label">Room colour</div>
-      ${this.colorSwatches(targets.join(","))}
+      <div class="room-bright">
+        <div class="rp-palette-label">Room brightness</div>
+        <input type="range" class="room-slider" min="1" max="100" value="${Math.max(1, avgBrightness || 65)}" data-room-brightness="${lights.join(",")}">
+      </div>
+      ${targets.length ? `<div class="room-colors"><div class="rp-palette-label">Room colour</div>${this.colorSwatches(targets.join(","))}</div>` : ""}
     </div>`;
   }
 
@@ -1877,7 +1952,7 @@ button{font:inherit;color:inherit;border:0;text-align:inherit;cursor:pointer;bac
 .block{padding:9px}
 
 /* Topbar */
-.topbar{display:flex;align-items:center;justify-content:space-between;padding:8px 14px 4px;z-index:30;isolation:isolate}
+.topbar{display:flex;align-items:center;justify-content:space-between;padding:8px 14px 4px;z-index:50;isolation:isolate;flex-shrink:0}
 .home-lbl{font-size:15px;font-weight:800;color:rgba(255,255,255,.64);letter-spacing:1.2px;text-transform:uppercase}
 .home-sub{font-size:11px;color:rgba(255,255,255,.38);margin-top:0}
 .topbar-right{display:flex;align-items:center;gap:9px}
@@ -1889,17 +1964,17 @@ button{font:inherit;color:inherit;border:0;text-align:inherit;cursor:pointer;bac
 .fs-btn ha-icon{--mdc-icon-size:16px;color:rgba(255,255,255,.6)}
 
 /* Tabs */
-.tabs{display:flex;gap:4px;padding:0 10px 5px;overflow-x:auto;scrollbar-width:none}
+.tabs{display:flex;gap:4px;padding:0 10px 7px;overflow-x:auto;scrollbar-width:none;position:relative;z-index:45;flex-shrink:0;background:linear-gradient(180deg,rgba(6,8,24,.64),rgba(6,8,24,.18))}
 .tabs::-webkit-scrollbar{display:none}
 .tab{flex-shrink:0;display:flex;align-items:center;gap:6px;padding:5px 11px;border-radius:18px;font-size:12px;font-weight:800;color:rgba(255,255,255,.52);border:1px solid rgba(255,255,255,.06);background:rgba(255,255,255,.05);transition:all .18s,transform .08s;white-space:nowrap}
 .tab ha-icon{--mdc-icon-size:15px;opacity:.7}
 .tab:hover{color:rgba(255,255,255,.70);background:rgba(255,255,255,.09)}
 .tab.active{background:rgba(255,255,255,.15);border-color:rgba(255,255,255,.28);color:rgba(255,255,255,.96)}
 .tab.active ha-icon{opacity:1}
-.divider{height:1px;background:rgba(255,255,255,.07);margin:0 10px}
+.divider{height:1px;background:rgba(255,255,255,.07);margin:0 10px;position:relative;z-index:44;flex-shrink:0}
 
 /* Page layout */
-.page{display:none;flex:0 0 auto;min-height:calc(100dvh - 78px);padding:5px 8px max(58px, env(safe-area-inset-bottom));flex-direction:column;overflow:visible;scrollbar-width:none;-webkit-overflow-scrolling:touch;scroll-padding-bottom:58px}
+.page{display:none;flex:0 0 auto;min-height:calc(100dvh - 78px);padding:8px 8px max(58px, env(safe-area-inset-bottom));flex-direction:column;overflow:visible;scrollbar-width:none;-webkit-overflow-scrolling:touch;scroll-padding-bottom:58px}
 .page::-webkit-scrollbar{display:none}
 .page.active{display:flex}
 .page-ov{gap:5px}
@@ -2009,16 +2084,19 @@ button.is-pressed{transform:scale(.93)!important;filter:brightness(1.2)}
 @keyframes sentry-pulse{0%,100%{opacity:1;transform:scale(1)}50%{opacity:.45;transform:scale(.72)}}
 
 /* Weather */
-.wx-big{padding:9px 12px;transition:background .4s,border-color .4s;position:relative;overflow:hidden}
+.wx-big{padding:9px 12px;transition:background .4s,border-color .4s;position:relative;overflow:hidden;box-shadow:inset 0 1px 0 rgba(255,255,255,.08),0 16px 44px rgba(0,0,0,.20)}
 .wx-big>*:not(.wx-sky){position:relative;z-index:1}
-.wx-sky{position:absolute;inset:0;z-index:0;pointer-events:none;opacity:.9}
+.wx-sky{position:absolute;inset:0;z-index:0;pointer-events:none;opacity:1;background:radial-gradient(circle at 12% 86%,rgba(239,68,68,.20),transparent 28%),radial-gradient(circle at 88% 20%,rgba(255,255,255,.08),transparent 32%)}
 .wx-sky span{position:absolute;display:block}
-.wx-cloudy .wx-sky span,.wx-partlycloudy .wx-sky span,.wx-rainy .wx-sky span,.wx-pouring .wx-sky span,.wx-lightning-rainy .wx-sky span{width:170px;height:70px;border-radius:999px;background:rgba(255,255,255,.09);filter:blur(12px)}
-.wx-cloudy .wx-sky span:nth-child(1),.wx-partlycloudy .wx-sky span:nth-child(1),.wx-rainy .wx-sky span:nth-child(1),.wx-pouring .wx-sky span:nth-child(1),.wx-lightning-rainy .wx-sky span:nth-child(1){top:12px;right:7%;transform:rotate(-8deg)}
-.wx-cloudy .wx-sky span:nth-child(2),.wx-partlycloudy .wx-sky span:nth-child(2),.wx-rainy .wx-sky span:nth-child(2),.wx-pouring .wx-sky span:nth-child(2),.wx-lightning-rainy .wx-sky span:nth-child(2){top:58px;left:18%;width:210px;opacity:.55}
-.wx-sunny .wx-sky::before{content:"";position:absolute;left:4%;top:6%;width:150px;height:150px;border-radius:50%;background:radial-gradient(circle,rgba(251,191,36,.32),rgba(251,191,36,.08) 46%,transparent 70%);filter:blur(2px)}
+.wx-cloudy .wx-sky span,.wx-partlycloudy .wx-sky span,.wx-rainy .wx-sky span,.wx-pouring .wx-sky span,.wx-lightning-rainy .wx-sky span{width:240px;height:92px;border-radius:999px;background:rgba(255,255,255,.16);filter:blur(14px)}
+.wx-cloudy .wx-sky span:nth-child(1),.wx-partlycloudy .wx-sky span:nth-child(1),.wx-rainy .wx-sky span:nth-child(1),.wx-pouring .wx-sky span:nth-child(1),.wx-lightning-rainy .wx-sky span:nth-child(1){top:2px;right:4%;transform:rotate(-8deg)}
+.wx-cloudy .wx-sky span:nth-child(2),.wx-partlycloudy .wx-sky span:nth-child(2),.wx-rainy .wx-sky span:nth-child(2),.wx-pouring .wx-sky span:nth-child(2),.wx-lightning-rainy .wx-sky span:nth-child(2){top:66px;left:18%;width:260px;opacity:.75}
+.wx-cloudy .wx-sky span:nth-child(3),.wx-partlycloudy .wx-sky span:nth-child(3),.wx-rainy .wx-sky span:nth-child(3),.wx-pouring .wx-sky span:nth-child(3){bottom:8px;right:28%;width:210px;opacity:.45}
+.wx-sunny .wx-sky{background:linear-gradient(145deg,rgba(251,191,36,.18),rgba(59,130,246,.10)),radial-gradient(circle at 13% 80%,rgba(248,113,113,.32),transparent 30%)}
+.wx-sunny .wx-sky::before{content:"";position:absolute;left:4%;top:6%;width:190px;height:190px;border-radius:50%;background:radial-gradient(circle,rgba(251,191,36,.55),rgba(251,191,36,.16) 46%,transparent 70%);filter:blur(2px)}
 .wx-clear-night .wx-sky::before,.wx-clear .wx-sky::before{content:"";position:absolute;right:8%;top:10%;width:95px;height:95px;border-radius:50%;background:radial-gradient(circle,rgba(199,210,254,.22),rgba(129,140,248,.05) 48%,transparent 72%)}
-.wx-rainy .wx-sky::after,.wx-pouring .wx-sky::after,.wx-lightning-rainy .wx-sky::after{content:"";position:absolute;inset:0;background:repeating-linear-gradient(105deg,transparent 0 18px,rgba(96,165,250,.22) 19px 21px,transparent 22px 34px);opacity:.32;transform:translateX(-20px)}
+.wx-rainy .wx-sky,.wx-pouring .wx-sky,.wx-lightning-rainy .wx-sky{background:linear-gradient(145deg,rgba(37,99,235,.30),rgba(15,23,42,.08)),radial-gradient(circle at 10% 80%,rgba(37,99,235,.30),transparent 30%)}
+.wx-rainy .wx-sky::after,.wx-pouring .wx-sky::after,.wx-lightning-rainy .wx-sky::after{content:"";position:absolute;inset:0;background:repeating-linear-gradient(105deg,transparent 0 14px,rgba(96,165,250,.38) 15px 17px,transparent 18px 28px);opacity:.48;transform:translateX(-20px)}
 .wx-lightning .wx-sky::before,.wx-lightning-rainy .wx-sky::before{content:"";position:absolute;right:18%;top:10%;width:80px;height:120px;background:linear-gradient(140deg,transparent 0 38%,rgba(253,224,71,.55) 39% 43%,transparent 44% 100%);filter:drop-shadow(0 0 16px rgba(253,224,71,.55))}
 .wx-fog .wx-sky::after{content:"";position:absolute;inset:12px;background:repeating-linear-gradient(0deg,transparent 0 17px,rgba(255,255,255,.10) 18px 21px);filter:blur(3px);opacity:.6}
 .wx-hero{display:flex;align-items:center;gap:14px;margin-bottom:7px}
@@ -2122,13 +2200,22 @@ button.is-pressed{transform:scale(.93)!important;filter:brightness(1.2)}
 .li-slider::-webkit-slider-thumb{-webkit-appearance:none;width:15px;height:15px;border-radius:50%;background:rgba(200,185,255,.92);cursor:pointer;box-shadow:0 1px 5px rgba(0,0,0,.35)}
 .li-slider::-moz-range-thumb{width:15px;height:15px;border-radius:50%;background:rgba(200,185,255,.92);cursor:pointer;border:0}
 .li-color-wrap{padding:0 11px 9px}
-.room-palette{margin-top:9px;padding-top:8px;border-top:1px solid rgba(255,255,255,.07);display:flex;align-items:center;justify-content:space-between;gap:8px}
+.room-palette{margin-top:9px;padding-top:8px;border-top:1px solid rgba(255,255,255,.07);display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap}
 .rp-palette-label{font-size:9px;font-weight:800;letter-spacing:.6px;text-transform:uppercase;color:rgba(255,255,255,.34)}
+.room-bright{display:flex;align-items:center;gap:8px;min-width:220px;flex:1}
+.room-colors{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.room-slider{-webkit-appearance:none;appearance:none;flex:1;height:4px;border-radius:4px;background:linear-gradient(90deg,rgba(167,139,250,.85),rgba(255,255,255,.16));outline:none;cursor:pointer}
+.room-slider::-webkit-slider-thumb{-webkit-appearance:none;width:17px;height:17px;border-radius:50%;background:#fff;box-shadow:0 1px 8px rgba(0,0,0,.35)}
+.room-slider::-moz-range-thumb{width:17px;height:17px;border-radius:50%;background:#fff;border:0;box-shadow:0 1px 8px rgba(0,0,0,.35)}
 .swatches{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
 .swatches.compact{gap:5px}
 .c-swatch{width:22px;height:22px;border-radius:50%;background:var(--sw);border:2px solid rgba(255,255,255,.22)!important;box-shadow:0 0 0 1px rgba(0,0,0,.18),0 5px 12px rgba(0,0,0,.20);transition:transform .08s,filter .12s,box-shadow .12s}
 .swatches.compact .c-swatch{width:18px;height:18px}
 .c-swatch:hover{filter:brightness(1.12);box-shadow:0 0 0 1px rgba(255,255,255,.22),0 0 13px rgba(255,255,255,.22)}
+.c-picker{position:relative;width:22px;height:22px;border-radius:50%;display:flex;align-items:center;justify-content:center;background:conic-gradient(#ef4444,#f97316,#facc15,#22c55e,#3b82f6,#a855f7,#ef4444);border:2px solid rgba(255,255,255,.24);overflow:hidden;box-shadow:0 5px 12px rgba(0,0,0,.2);cursor:pointer}
+.swatches.compact .c-picker{width:18px;height:18px}
+.c-picker ha-icon{--mdc-icon-size:12px;color:#fff;filter:drop-shadow(0 1px 2px rgba(0,0,0,.45));pointer-events:none}
+.c-picker input{position:absolute;inset:0;opacity:0;cursor:pointer}
 
 /* Energy section */
 .en-section{padding:9px}
