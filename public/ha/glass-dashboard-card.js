@@ -22,6 +22,7 @@ class GlassDashboardCard extends HTMLElement {
     this._noticeTimer = null;
     this._audioCtx = null;
     this._lastClickSound = 0;
+    this._colorPickerOpenUntil = 0;
     this._energy = { prefs: null, stats: {}, period: "day", loadedAt: {}, loading: false, loadingPeriods: new Set() };
     this._energyRate = 0.29; // €/kWh — change to match your contract
     // Presence detection
@@ -103,7 +104,8 @@ class GlassDashboardCard extends HTMLElement {
     if (sig !== this._lastSig) {
       this._lastSig = sig;
       clearTimeout(this._renderDebounce);
-      this._renderDebounce = setTimeout(() => this.render(), 100);
+      const pickerDelay = Math.max(0, this._colorPickerOpenUntil - Date.now());
+      this._renderDebounce = setTimeout(() => this.render(), pickerDelay ? pickerDelay + 350 : 100);
     }
     if (!this._timer) this._timer = window.setInterval(() => this.updateClock(), 10000);
     if (!this._presence.started) this.startPresenceDetection();
@@ -671,13 +673,14 @@ class GlassDashboardCard extends HTMLElement {
     if (!targets.length || !/^#[0-9a-f]{6}$/i.test(String(hex))) return;
     const rgb = [1,3,5].map(i => parseInt(hex.slice(i, i + 2), 16));
     this.setOptimistic(targets, "on", 5000);
+    this._colorPickerOpenUntil = Date.now() + 1800;
     try {
       await this.service("light", "turn_on", {
         entity_id: targets,
         rgb_color: rgb,
         brightness_pct: 85,
       });
-      window.setTimeout(() => this.render(), 650);
+      window.setTimeout(() => this.render(), 1800);
     } catch (err) {
       targets.forEach(entity => this._optimistic.delete(entity));
       this.render();
@@ -1076,7 +1079,6 @@ class GlassDashboardCard extends HTMLElement {
   <div class="topbar z1">
     <div>
       <div class="home-lbl" id="greeting">${this.greeting()}</div>
-      <div class="home-sub">Home overview</div>
     </div>
     <div class="topbar-right">
       <button class="fs-btn" data-action="sleep" title="Sleep screen">
@@ -1213,9 +1215,20 @@ class GlassDashboardCard extends HTMLElement {
     });
 
     this.shadowRoot.querySelectorAll("[data-color-picker]").forEach(input => {
+      const keepPickerOpen = () => {
+        this._colorPickerOpenUntil = Date.now() + 12000;
+        clearTimeout(this._renderDebounce);
+      };
+      ["pointerdown","touchstart","mousedown","click","focus","input"].forEach(evt =>
+        input.addEventListener(evt, e => {
+          e.stopPropagation();
+          keepPickerOpen();
+        }, { passive: evt === "touchstart" })
+      );
       input.addEventListener("click", e => e.stopPropagation());
       input.addEventListener("change", e => {
         e.stopPropagation();
+        this._colorPickerOpenUntil = Date.now() + 1800;
         this.setLightRgb(input.dataset.colorPicker, input.value);
       });
     });
@@ -1766,10 +1779,17 @@ class GlassDashboardCard extends HTMLElement {
       return `<g>
         <line x1="${hx.toFixed(1)}" y1="${(hy + 7).toFixed(1)}" x2="${lx.toFixed(1)}" y2="${(ly - 7).toFixed(1)}" stroke="rgba(255,255,255,.12)" stroke-width="1"/>
         <circle cx="${hx.toFixed(1)}" cy="${hy.toFixed(1)}" r="4" fill="rgba(255,255,255,.95)"/>
-        <text x="${hx.toFixed(1)}" y="${(hy - 9).toFixed(1)}" text-anchor="middle" class="wx-svg-hi">${d.hi}°</text>
         <circle cx="${lx.toFixed(1)}" cy="${ly.toFixed(1)}" r="3" fill="rgba(147,197,253,.95)"/>
-        <text x="${lx.toFixed(1)}" y="${(ly + 17).toFixed(1)}" text-anchor="middle" class="wx-svg-lo">${d.lo}°</text>
       </g>`;
+    }).join("");
+    const graphTop = 28, graphH = 76;
+    const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
+    const tempLabels = parsed.map((d, i) => {
+      const hx = hiPts[i][0], hy = hiPts[i][1], lx = loPts[i][0], ly = loPts[i][1];
+      const hiTop = clamp(graphTop + (hy / H) * graphH - 17, graphTop + 1, graphTop + graphH - 36);
+      const loTop = clamp(graphTop + (ly / H) * graphH + 4, graphTop + 18, graphTop + graphH - 15);
+      return `<div class="wx-temp-label hi" style="left:${(hx / W * 100).toFixed(2)}%;top:${hiTop.toFixed(1)}px">${d.hi}°</div>
+        <div class="wx-temp-label lo" style="left:${(lx / W * 100).toFixed(2)}%;top:${loTop.toFixed(1)}px">${d.lo}°</div>`;
     }).join("");
     const dayNodes = parsed.map((d, i) => {
       const ca = condAccent[d.cond] || condAccent.partlycloudy;
@@ -1794,6 +1814,7 @@ class GlassDashboardCard extends HTMLElement {
         ${segments}
         ${points}
       </svg>
+      ${tempLabels}
     </div>`;
   }
 
@@ -2012,13 +2033,13 @@ button{font:inherit;color:inherit;border:0;text-align:inherit;cursor:pointer;bac
 .block{padding:9px}
 
 /* Topbar */
-.topbar{display:flex;align-items:center;justify-content:space-between;padding:max(28px,env(safe-area-inset-top)) 14px 4px;z-index:50;isolation:isolate;flex-shrink:0}
-.home-lbl{font-size:15px;font-weight:800;color:rgba(255,255,255,.64);letter-spacing:1.2px;text-transform:uppercase}
+.topbar{display:flex;align-items:flex-start;justify-content:space-between;padding:max(32px,env(safe-area-inset-top)) 14px 2px;z-index:50;isolation:isolate;flex-shrink:0}
+.home-lbl{font-size:15px;font-weight:800;color:rgba(255,255,255,.64);letter-spacing:1.2px;text-transform:uppercase;padding-top:2px}
 .home-sub{font-size:11px;color:rgba(255,255,255,.38);margin-top:0}
 .topbar-right{display:flex;align-items:center;gap:9px}
 .clock-wrap{text-align:right}
-.clk-time{font-size:25px;font-weight:200;color:rgba(255,255,255,.94);letter-spacing:-1px;line-height:1}
-.clk-date{font-size:12px;color:rgba(255,255,255,.56);margin-top:0}
+.clk-time{font-size:36px;font-weight:200;color:rgba(255,255,255,.94);letter-spacing:-1.4px;line-height:.9}
+.clk-date{font-size:14px;color:rgba(255,255,255,.56);margin-top:4px}
 .fs-btn{display:flex;align-items:center;justify-content:center;width:30px;height:30px;border-radius:50%;background:rgba(255,255,255,.07);border:1px solid rgba(255,255,255,.12)!important;transition:all .15s,transform .08s;flex-shrink:0}
 .fs-btn:hover{background:rgba(255,255,255,.13)}
 .fs-btn ha-icon{--mdc-icon-size:16px;color:rgba(255,255,255,.6)}
@@ -2188,9 +2209,10 @@ button.is-pressed{transform:scale(.93)!important;filter:brightness(1.2)}
 .wxg-label{font-size:9px;color:rgba(255,255,255,.52);text-transform:uppercase;letter-spacing:.45px;font-weight:800}
 .wxg-icon{--mdc-icon-size:17px;filter:drop-shadow(0 2px 5px rgba(0,0,0,.35))}
 .wxg-rain{font-size:9px;color:rgba(96,165,250,.88);font-weight:800}
-.wxg-svg{width:100%;height:100%;display:block;overflow:visible}
-.wx-svg-hi{font-size:16px;font-weight:800;fill:rgba(255,255,255,.92);paint-order:stroke;stroke:rgba(5,8,24,.7);stroke-width:3px;stroke-linejoin:round}
-.wx-svg-lo{font-size:13px;font-weight:700;fill:rgba(191,219,254,.82);paint-order:stroke;stroke:rgba(5,8,24,.65);stroke-width:3px;stroke-linejoin:round}
+.wxg-svg{position:absolute;left:0;right:0;top:28px;bottom:0;width:100%;height:auto;display:block;overflow:visible}
+.wx-temp-label{position:absolute;z-index:3;transform:translateX(-50%);font-weight:800;line-height:1;letter-spacing:0;text-shadow:0 2px 5px rgba(5,8,24,.8),0 0 8px rgba(5,8,24,.7);white-space:nowrap;pointer-events:none}
+.wx-temp-label.hi{font-size:18px;color:rgba(255,255,255,.95)}
+.wx-temp-label.lo{font-size:14px;color:rgba(191,219,254,.84)}
 @keyframes cloud-drift-1{from{transform:translateX(-10px) rotate(-8deg)}to{transform:translateX(18px) rotate(-6deg)}}
 @keyframes cloud-drift-2{from{transform:translateX(16px)}to{transform:translateX(-20px)}}
 @keyframes cloud-drift-3{from{transform:translateX(-14px)}to{transform:translateX(14px)}}
