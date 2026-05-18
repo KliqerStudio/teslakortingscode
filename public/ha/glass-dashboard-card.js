@@ -1691,22 +1691,7 @@ class GlassDashboardCard extends HTMLElement {
 
     const days = (this._forecast||[]).slice(0,5);
     const forecastHTML = days.length
-      ? days.map(d => {
-          const dt     = new Date(d.datetime);
-          const lbl    = dt.toLocaleDateString([],{weekday:"short"});
-          const hi     = Math.round(d.temperature);
-          const lo     = d.templow!=null ? Math.round(d.templow) : Math.round(d.temperature-4);
-          const cond   = d.condition || state;
-          const precip = d.precipitation_probability != null ? Math.round(d.precipitation_probability) : null;
-          const ca     = condAccent[cond] || condAccent.partlycloudy;
-          return `<div class="glsm wx-day">
-            <div class="wxdn">${lbl}</div>
-            <ha-icon class="wxdi" icon="${this.weatherIcon(cond)}" style="color:${ca.ico}"></ha-icon>
-            <div class="wxdh">${hi}°</div>
-            <div class="wxdl">${lo}°</div>
-            ${precip!=null ? `<div class="wx-precip">${precip}%</div>` : ""}
-          </div>`;
-        }).join("")
+      ? this.weatherForecastGraph(days, state, condAccent)
       : `<div class="wx-nof"><span>${this._forecastLoading ? "Loading forecast…" : "Forecast unavailable"}</span>${!this._forecastLoading ? `<button class="wx-retry" data-action="forecast-retry"><ha-icon icon="mdi:refresh"></ha-icon> Retry</button>` : ""}</div>`;
 
     const extras = [
@@ -1735,6 +1720,81 @@ class GlassDashboardCard extends HTMLElement {
       <div class="wx-sep"></div>
       <div class="wx-forecast">${forecastHTML}</div>
     </section>`;
+  }
+
+  weatherForecastGraph(days, fallbackState, condAccent) {
+    const parsed = days.map(d => {
+      const dt = new Date(d.datetime);
+      const hi = Number(d.temperature);
+      const lo = d.templow != null ? Number(d.templow) : hi - 4;
+      return {
+        label: dt.toLocaleDateString([], { weekday: "short" }),
+        hi: Number.isFinite(hi) ? Math.round(hi) : null,
+        lo: Number.isFinite(lo) ? Math.round(lo) : null,
+        cond: d.condition || fallbackState,
+        precip: d.precipitation_probability != null ? Math.round(d.precipitation_probability) : null,
+      };
+    }).filter(d => d.hi != null && d.lo != null);
+
+    if (!parsed.length) return "";
+
+    const W = 500, H = 108, top = 18, bottom = 96;
+    const temps = parsed.flatMap(d => [d.hi, d.lo]);
+    const minT = Math.min(...temps);
+    const maxT = Math.max(...temps);
+    const rng = Math.max(1, maxT - minT);
+    const x = i => parsed.length === 1 ? W / 2 : 34 + i * ((W - 68) / (parsed.length - 1));
+    const y = v => bottom - ((v - minT) / rng) * (bottom - top);
+    const hiPts = parsed.map((d, i) => [x(i), y(d.hi), d.hi]);
+    const loPts = parsed.map((d, i) => [x(i), y(d.lo), d.lo]);
+    const path = pts => pts.map((p, i) => `${i ? "L" : "M"}${p[0].toFixed(1)},${p[1].toFixed(1)}`).join(" ");
+    const bandPath = `${path(hiPts)} ${loPts.slice().reverse().map(p => `L${p[0].toFixed(1)},${p[1].toFixed(1)}`).join(" ")} Z`;
+    const segments = hiPts.slice(0, -1).map((p, i) => {
+      const n = hiPts[i + 1];
+      const delta = parsed[i + 1].hi - parsed[i].hi;
+      const color = delta > 0 ? "#f59e0b" : delta < 0 ? "#60a5fa" : "#a78bfa";
+      return `<path d="M${p[0].toFixed(1)},${p[1].toFixed(1)} L${n[0].toFixed(1)},${n[1].toFixed(1)}" stroke="${color}" stroke-width="4" stroke-linecap="round"/>`;
+    }).join("");
+    const lowSegments = loPts.slice(0, -1).map((p, i) => {
+      const n = loPts[i + 1];
+      const delta = parsed[i + 1].lo - parsed[i].lo;
+      const color = delta > 0 ? "rgba(251,191,36,.78)" : delta < 0 ? "rgba(96,165,250,.78)" : "rgba(167,139,250,.68)";
+      return `<path d="M${p[0].toFixed(1)},${p[1].toFixed(1)} L${n[0].toFixed(1)},${n[1].toFixed(1)}" stroke="${color}" stroke-width="2" stroke-linecap="round" stroke-dasharray="3 5"/>`;
+    }).join("");
+    const points = parsed.map((d, i) => {
+      const hx = hiPts[i][0], hy = hiPts[i][1], lx = loPts[i][0], ly = loPts[i][1];
+      return `<g>
+        <line x1="${hx.toFixed(1)}" y1="${(hy + 7).toFixed(1)}" x2="${lx.toFixed(1)}" y2="${(ly - 7).toFixed(1)}" stroke="rgba(255,255,255,.12)" stroke-width="1"/>
+        <circle cx="${hx.toFixed(1)}" cy="${hy.toFixed(1)}" r="4" fill="rgba(255,255,255,.95)"/>
+        <text x="${hx.toFixed(1)}" y="${(hy - 9).toFixed(1)}" text-anchor="middle" class="wx-svg-hi">${d.hi}°</text>
+        <circle cx="${lx.toFixed(1)}" cy="${ly.toFixed(1)}" r="3" fill="rgba(147,197,253,.95)"/>
+        <text x="${lx.toFixed(1)}" y="${(ly + 17).toFixed(1)}" text-anchor="middle" class="wx-svg-lo">${d.lo}°</text>
+      </g>`;
+    }).join("");
+    const dayNodes = parsed.map((d, i) => {
+      const ca = condAccent[d.cond] || condAccent.partlycloudy;
+      return `<div class="wxg-day" style="left:${(x(i) / W * 100).toFixed(2)}%">
+        <div class="wxg-label">${d.label}</div>
+        <ha-icon class="wxg-icon" icon="${this.weatherIcon(d.cond)}" style="color:${ca.ico}"></ha-icon>
+        ${d.precip != null ? `<div class="wxg-rain">${d.precip}%</div>` : ""}
+      </div>`;
+    }).join("");
+
+    return `<div class="wx-graph">
+      <div class="wxg-days">${dayNodes}</div>
+      <svg class="wxg-svg" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none">
+        <defs>
+          <linearGradient id="wxBand" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stop-color="rgba(251,191,36,.24)"/>
+            <stop offset="100%" stop-color="rgba(96,165,250,.12)"/>
+          </linearGradient>
+        </defs>
+        <path d="${bandPath}" fill="url(#wxBand)"/>
+        ${lowSegments}
+        ${segments}
+        ${points}
+      </svg>
+    </div>`;
   }
 
   lightItem(entity) {
@@ -2012,7 +2072,7 @@ button.is-pressed{transform:scale(.93)!important;filter:brightness(1.2)}
 .clim-sep{width:1px;height:100%;min-height:56px;background:rgba(255,255,255,.09);margin:0 4px;align-self:stretch}
 .clim-col{padding:2px 6px;text-align:center;display:flex;flex-direction:column;align-items:center}
 .aq-col{justify-content:center;padding-top:4px}
-.cv{font-size:25px;font-weight:300;color:rgba(255,255,255,.98);letter-spacing:-0.8px;line-height:1}
+.cv{font-size:28px;font-weight:300;color:rgba(255,255,255,.98);letter-spacing:-0.8px;line-height:1}
 .cu{font-size:12px;color:rgba(255,255,255,.55)}
 .cl{font-size:10px;color:rgba(255,255,255,.46);text-transform:uppercase;letter-spacing:.5px;margin-top:2px;white-space:nowrap}
 .spark-wrap{width:100%;height:25px;margin-top:4px;overflow:hidden}
@@ -2020,7 +2080,7 @@ button.is-pressed{transform:scale(.93)!important;filter:brightness(1.2)}
 .spark-empty{width:100%;height:25px;border-bottom:1px solid rgba(255,255,255,.06)}
 .aq-spark{height:24px;margin-top:5px}
 .aq-spark .spark{height:24px}
-.aq-text{font-size:20px!important;font-weight:800!important;text-transform:capitalize}
+.aq-text{font-size:22px!important;font-weight:800!important;text-transform:capitalize}
 
 /* Tesla card — Tesla-app style */
 .tc{overflow:hidden;padding:0}
@@ -2089,16 +2149,16 @@ button.is-pressed{transform:scale(.93)!important;filter:brightness(1.2)}
 .wx-sky{position:absolute;inset:0;z-index:0;pointer-events:none;opacity:1;background:radial-gradient(circle at 12% 86%,rgba(239,68,68,.20),transparent 28%),radial-gradient(circle at 88% 20%,rgba(255,255,255,.08),transparent 32%)}
 .wx-sky span{position:absolute;display:block}
 .wx-cloudy .wx-sky span,.wx-partlycloudy .wx-sky span,.wx-rainy .wx-sky span,.wx-pouring .wx-sky span,.wx-lightning-rainy .wx-sky span{width:240px;height:92px;border-radius:999px;background:rgba(255,255,255,.16);filter:blur(14px)}
-.wx-cloudy .wx-sky span:nth-child(1),.wx-partlycloudy .wx-sky span:nth-child(1),.wx-rainy .wx-sky span:nth-child(1),.wx-pouring .wx-sky span:nth-child(1),.wx-lightning-rainy .wx-sky span:nth-child(1){top:2px;right:4%;transform:rotate(-8deg)}
-.wx-cloudy .wx-sky span:nth-child(2),.wx-partlycloudy .wx-sky span:nth-child(2),.wx-rainy .wx-sky span:nth-child(2),.wx-pouring .wx-sky span:nth-child(2),.wx-lightning-rainy .wx-sky span:nth-child(2){top:66px;left:18%;width:260px;opacity:.75}
-.wx-cloudy .wx-sky span:nth-child(3),.wx-partlycloudy .wx-sky span:nth-child(3),.wx-rainy .wx-sky span:nth-child(3),.wx-pouring .wx-sky span:nth-child(3){bottom:8px;right:28%;width:210px;opacity:.45}
+.wx-cloudy .wx-sky span:nth-child(1),.wx-partlycloudy .wx-sky span:nth-child(1),.wx-rainy .wx-sky span:nth-child(1),.wx-pouring .wx-sky span:nth-child(1),.wx-lightning-rainy .wx-sky span:nth-child(1){top:2px;right:4%;transform:rotate(-8deg);animation:cloud-drift-1 20s ease-in-out infinite alternate}
+.wx-cloudy .wx-sky span:nth-child(2),.wx-partlycloudy .wx-sky span:nth-child(2),.wx-rainy .wx-sky span:nth-child(2),.wx-pouring .wx-sky span:nth-child(2),.wx-lightning-rainy .wx-sky span:nth-child(2){top:66px;left:18%;width:260px;opacity:.75;animation:cloud-drift-2 24s ease-in-out infinite alternate}
+.wx-cloudy .wx-sky span:nth-child(3),.wx-partlycloudy .wx-sky span:nth-child(3),.wx-rainy .wx-sky span:nth-child(3),.wx-pouring .wx-sky span:nth-child(3){bottom:8px;right:28%;width:210px;opacity:.45;animation:cloud-drift-3 28s ease-in-out infinite alternate}
 .wx-sunny .wx-sky{background:linear-gradient(145deg,rgba(251,191,36,.18),rgba(59,130,246,.10)),radial-gradient(circle at 13% 80%,rgba(248,113,113,.32),transparent 30%)}
-.wx-sunny .wx-sky::before{content:"";position:absolute;left:4%;top:6%;width:190px;height:190px;border-radius:50%;background:radial-gradient(circle,rgba(251,191,36,.55),rgba(251,191,36,.16) 46%,transparent 70%);filter:blur(2px)}
+.wx-sunny .wx-sky::before{content:"";position:absolute;left:4%;top:6%;width:190px;height:190px;border-radius:50%;background:radial-gradient(circle,rgba(251,191,36,.55),rgba(251,191,36,.16) 46%,transparent 70%);filter:blur(2px);animation:sun-breathe 5s ease-in-out infinite}
 .wx-clear-night .wx-sky::before,.wx-clear .wx-sky::before{content:"";position:absolute;right:8%;top:10%;width:95px;height:95px;border-radius:50%;background:radial-gradient(circle,rgba(199,210,254,.22),rgba(129,140,248,.05) 48%,transparent 72%)}
 .wx-rainy .wx-sky,.wx-pouring .wx-sky,.wx-lightning-rainy .wx-sky{background:linear-gradient(145deg,rgba(37,99,235,.30),rgba(15,23,42,.08)),radial-gradient(circle at 10% 80%,rgba(37,99,235,.30),transparent 30%)}
-.wx-rainy .wx-sky::after,.wx-pouring .wx-sky::after,.wx-lightning-rainy .wx-sky::after{content:"";position:absolute;inset:0;background:repeating-linear-gradient(105deg,transparent 0 14px,rgba(96,165,250,.38) 15px 17px,transparent 18px 28px);opacity:.48;transform:translateX(-20px)}
-.wx-lightning .wx-sky::before,.wx-lightning-rainy .wx-sky::before{content:"";position:absolute;right:18%;top:10%;width:80px;height:120px;background:linear-gradient(140deg,transparent 0 38%,rgba(253,224,71,.55) 39% 43%,transparent 44% 100%);filter:drop-shadow(0 0 16px rgba(253,224,71,.55))}
-.wx-fog .wx-sky::after{content:"";position:absolute;inset:12px;background:repeating-linear-gradient(0deg,transparent 0 17px,rgba(255,255,255,.10) 18px 21px);filter:blur(3px);opacity:.6}
+.wx-rainy .wx-sky::after,.wx-pouring .wx-sky::after,.wx-lightning-rainy .wx-sky::after{content:"";position:absolute;inset:-80px 0 0;background:repeating-linear-gradient(105deg,transparent 0 14px,rgba(96,165,250,.38) 15px 17px,transparent 18px 28px);opacity:.48;transform:translateX(-20px);animation:rain-slide .85s linear infinite}
+.wx-lightning .wx-sky::before,.wx-lightning-rainy .wx-sky::before{content:"";position:absolute;right:18%;top:10%;width:80px;height:120px;background:linear-gradient(140deg,transparent 0 38%,rgba(253,224,71,.55) 39% 43%,transparent 44% 100%);filter:drop-shadow(0 0 16px rgba(253,224,71,.55));animation:lightning-flash 4.5s steps(1,end) infinite}
+.wx-fog .wx-sky::after{content:"";position:absolute;inset:12px;background:repeating-linear-gradient(0deg,transparent 0 17px,rgba(255,255,255,.10) 18px 21px);filter:blur(3px);opacity:.6;animation:fog-drift 16s ease-in-out infinite alternate}
 .wx-hero{display:flex;align-items:center;gap:14px;margin-bottom:7px}
 .wx-hero-left{display:flex;align-items:center;gap:11px;flex-shrink:0}
 .wx-ico-big{--mdc-icon-size:54px;transition:color .4s}
@@ -2108,10 +2168,10 @@ button.is-pressed{transform:scale(.93)!important;filter:brightness(1.2)}
 .wx-details{display:flex;gap:6px;flex-wrap:wrap;flex:1}
 .wx-det{display:flex;flex-direction:column;align-items:center;gap:2px;min-width:55px;background:rgba(255,255,255,.07);border:1px solid rgba(255,255,255,.1);border-radius:10px;padding:6px 9px;flex:1}
 .wx-det ha-icon{--mdc-icon-size:17px;color:rgba(255,255,255,.55)}
-.wx-det-val{font-size:16px;font-weight:700;color:rgba(255,255,255,.9)}
+.wx-det-val{font-size:18px;font-weight:700;color:rgba(255,255,255,.9)}
 .wx-det-lbl{font-size:10px;color:rgba(255,255,255,.43);text-transform:uppercase;letter-spacing:.4px;text-align:center}
 .wx-sep{height:1px;background:rgba(255,255,255,.1);margin:7px 0}
-.wx-forecast{display:grid;grid-template-columns:repeat(5,1fr);gap:6px}
+.wx-forecast{display:block}
 .wx-nof{display:flex;align-items:center;justify-content:center;gap:10px;color:rgba(255,255,255,.28);font-size:10px;padding:10px;text-align:center}
 .wx-retry{display:flex;align-items:center;gap:4px;background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.14)!important;border-radius:8px;padding:4px 9px;font-size:9px;font-weight:700;color:rgba(255,255,255,.55);cursor:pointer;transition:all .15s}
 .wx-retry:hover{background:rgba(255,255,255,.13)}
@@ -2122,6 +2182,25 @@ button.is-pressed{transform:scale(.93)!important;filter:brightness(1.2)}
 .wxdh{font-size:16px;font-weight:700;color:rgba(255,255,255,.88)}
 .wxdl{font-size:12px;color:rgba(255,255,255,.47);margin-top:1px}
 .wx-precip{font-size:10px;color:rgba(96,165,250,.8);margin-top:2px;font-weight:700}
+.wx-graph{position:relative;height:104px;border-radius:11px;overflow:hidden;background:rgba(255,255,255,.045);border:1px solid rgba(255,255,255,.075);padding-top:28px}
+.wxg-days{position:absolute;left:0;right:0;top:4px;height:28px;z-index:2}
+.wxg-day{position:absolute;top:0;transform:translateX(-50%);display:flex;align-items:center;gap:5px;min-width:58px;justify-content:center;white-space:nowrap}
+.wxg-label{font-size:9px;color:rgba(255,255,255,.52);text-transform:uppercase;letter-spacing:.45px;font-weight:800}
+.wxg-icon{--mdc-icon-size:17px;filter:drop-shadow(0 2px 5px rgba(0,0,0,.35))}
+.wxg-rain{font-size:9px;color:rgba(96,165,250,.88);font-weight:800}
+.wxg-svg{width:100%;height:100%;display:block;overflow:visible}
+.wx-svg-hi{font-size:16px;font-weight:800;fill:rgba(255,255,255,.92);paint-order:stroke;stroke:rgba(5,8,24,.7);stroke-width:3px;stroke-linejoin:round}
+.wx-svg-lo{font-size:13px;font-weight:700;fill:rgba(191,219,254,.82);paint-order:stroke;stroke:rgba(5,8,24,.65);stroke-width:3px;stroke-linejoin:round}
+@keyframes cloud-drift-1{from{transform:translateX(-10px) rotate(-8deg)}to{transform:translateX(18px) rotate(-6deg)}}
+@keyframes cloud-drift-2{from{transform:translateX(16px)}to{transform:translateX(-20px)}}
+@keyframes cloud-drift-3{from{transform:translateX(-14px)}to{transform:translateX(14px)}}
+@keyframes rain-slide{from{background-position:0 0}to{background-position:-30px 80px}}
+@keyframes sun-breathe{0%,100%{transform:scale(.96);opacity:.82}50%{transform:scale(1.05);opacity:1}}
+@keyframes fog-drift{from{transform:translateX(-18px)}to{transform:translateX(18px)}}
+@keyframes lightning-flash{0%,86%,100%{opacity:.18}88%,90%{opacity:1}92%{opacity:.25}94%{opacity:.9}}
+@media(prefers-reduced-motion:reduce){
+  .wx-sky span,.wx-sky::before,.wx-sky::after{animation:none!important}
+}
 
 /* Spotify */
 .sp2{padding:7px 10px;display:flex;gap:10px;align-items:flex-start}
@@ -2162,7 +2241,7 @@ button.is-pressed{transform:scale(.93)!important;filter:brightness(1.2)}
 .pulse-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:5px}
 .pulse-item{min-width:0;border-radius:10px;background:rgba(255,255,255,.055);border:1px solid rgba(255,255,255,.08);padding:7px 6px;text-align:center}
 .pulse-item ha-icon{--mdc-icon-size:17px;color:rgba(255,255,255,.5);margin-bottom:3px}
-.pulse-item b{display:block;font-size:14px;line-height:1;color:rgba(255,255,255,.92);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.pulse-item b{display:block;font-size:16px;line-height:1;color:rgba(255,255,255,.92);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .pulse-item span{display:block;margin-top:3px;font-size:8px;text-transform:uppercase;letter-spacing:.35px;color:rgba(255,255,255,.38);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 
 /* Room pages */
@@ -2224,7 +2303,7 @@ button.is-pressed{transform:scale(.93)!important;filter:brightness(1.2)}
 .en-price{font-size:10px;color:rgba(255,255,255,.46);font-weight:800}
 .en-metrics{display:grid;grid-template-columns:1.35fr 1fr;gap:5px;margin-bottom:5px}
 .en-pill{min-width:0;padding:7px 8px;border-radius:10px;background:rgba(255,255,255,.055);border:1px solid rgba(255,255,255,.08)}
-.en-pill b{display:block;font-size:18px;line-height:1.05;font-weight:700;color:rgba(255,255,255,.94);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.en-pill b{display:block;font-size:20px;line-height:1.05;font-weight:700;color:rgba(255,255,255,.94);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .en-pill.live b{font-size:34px;font-weight:600;letter-spacing:-1.4px}
 .en-pill.total b{font-size:20px}
 .en-pill em{font-style:normal;font-size:16px;color:rgba(255,255,255,.72);margin-left:7px}
@@ -2256,7 +2335,7 @@ button.is-pressed{transform:scale(.93)!important;filter:brightness(1.2)}
 .net-grid{display:grid;grid-template-columns:1fr 1fr;gap:6px}
 .net-metric{padding:8px;border-radius:11px;background:rgba(255,255,255,.055);border:1px solid rgba(255,255,255,.08);min-width:0}
 .net-metric ha-icon{--mdc-icon-size:17px;color:rgba(255,255,255,.55);float:right}
-.net-metric b{display:block;font-size:18px;color:rgba(255,255,255,.92);line-height:1.05}
+.net-metric b{display:block;font-size:20px;color:rgba(255,255,255,.92);line-height:1.05}
 .net-metric span{display:block;font-size:9px;color:rgba(255,255,255,.42);text-transform:uppercase;letter-spacing:.5px;margin-top:2px}
 
 /* Scenes */
@@ -2291,7 +2370,7 @@ button.is-pressed{transform:scale(.93)!important;filter:brightness(1.2)}
   .rooms5{grid-template-columns:repeat(3,1fr)}
   .tc-img-wrap{height:124px}
   .tc-car{width:100%}
-  .wx-forecast{grid-template-columns:repeat(3,1fr)}
+  .wx-forecast{display:block}
   .media-strip{grid-template-columns:1fr}
   .sp2{flex-direction:column}
   .sp-art,.sp-art-empty{width:100%;height:84px}
