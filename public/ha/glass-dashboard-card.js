@@ -1559,17 +1559,18 @@ class GlassDashboardCard extends HTMLElement {
   }
 
   teslaClimateState(climOn, targetTemp) {
+    const cabin = Number(this.st(this.entities.teslaInsideTemp, NaN));
+    const cabinText = Number.isFinite(cabin) ? `${cabin.toFixed(1)}°C` : "--°C";
     if (!climOn) {
       return {
         mode: "off",
         label: "Climate",
         icon: "mdi:fan",
-        detail: `Off · ${targetTemp}°C`,
+        detail: `Off · Cabin ${cabinText}`,
         rowLabel: "Climate",
         active: false,
       };
     }
-    const cabin = Number(this.st(this.entities.teslaInsideTemp, NaN));
     const target = Number(targetTemp);
     if (Number.isFinite(cabin) && Number.isFinite(target)) {
       if (target > cabin + 0.4) {
@@ -1597,7 +1598,7 @@ class GlassDashboardCard extends HTMLElement {
       mode: "climate",
       label: "Climate",
       icon: "mdi:fan",
-      detail: `On · ${targetTemp}°C`,
+      detail: `On · Cabin ${cabinText}`,
       rowLabel: "Climate active",
       active: true,
     };
