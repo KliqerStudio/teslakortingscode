@@ -35,7 +35,7 @@ class GlassDashboardCard extends HTMLElement {
       mainLights: [
         "light.lounge_light","light.living_room","light.reading_light",
         "light.dining_room","light.led_keuken_boven","light.led_keuken_onder",
-        "light.govee_tv_left","light.govee_tv_right","light.marylin",
+        "light.marylin",
       ],
       bedroomLights: ["light.bed","light.kast","light.closet","light.ants_closet","light.watch_light"],
       gameLights: [
@@ -181,6 +181,15 @@ class GlassDashboardCard extends HTMLElement {
     const until = Date.now() + ttl;
     entities.forEach(entity => this._optimistic.set(entity, { state, until }));
   }
+  clearOptimistic(entities = []) {
+    entities.forEach(entity => this._optimistic.delete(entity));
+  }
+  reconcileSoon(entities = [], delay = 1200) {
+    window.setTimeout(() => {
+      this.clearOptimistic(entities);
+      this.render();
+    }, delay);
+  }
   showNotice(title, body, action = null) {
     this._notice = { title, body, action };
     if (this._noticeTimer) window.clearTimeout(this._noticeTimer);
@@ -205,16 +214,31 @@ class GlassDashboardCard extends HTMLElement {
   anyOn(entities)   { return this.actionable(entities).some(e => this.isOn(e)); }
   countOn(entities) { return this.actionable(entities).filter(e => this.isOn(e)).length; }
   service(domain, svc, data) { return this._hass?.callService(domain, svc, data); }
+  async turnEntities(targets, targetOn) {
+    const byDomain = targets.reduce((acc, entity) => {
+      const domain = entity.split(".")[0];
+      if (!acc[domain]) acc[domain] = [];
+      acc[domain].push(entity);
+      return acc;
+    }, {});
+    const calls = Object.entries(byDomain)
+      .filter(([domain]) => ["light","switch","input_boolean","fan"].includes(domain))
+      .map(([domain, entity_id]) => this.service(domain, targetOn ? "turn_on" : "turn_off", { entity_id }));
+    const results = await Promise.allSettled(calls);
+    const failed = results.filter(result => result.status === "rejected");
+    if (failed.length) throw failed[0].reason;
+  }
   async toggleEntity(entity) {
     if (!this._hass?.states?.[entity] || !this.isAvailable(entity)) return;
     const domain = entity.split(".")[0];
     const turnable = ["light","switch","input_boolean","fan"].includes(domain);
     const targetOn = !this.isOn(entity);
     if (turnable) {
-      this.setOptimistic([entity], targetOn ? "on" : "off");
+      this.setOptimistic([entity], targetOn ? "on" : "off", 1800);
       this.render();
       try {
         await this.service(domain, targetOn ? "turn_on" : "turn_off", { entity_id: entity });
+        this.reconcileSoon([entity], 900);
       } catch (err) {
         this._optimistic.delete(entity);
         if (entity.includes("model_3")) this.handleTeslaCommandError(err);
@@ -234,10 +258,11 @@ class GlassDashboardCard extends HTMLElement {
     const targets = this.actionable(entities);
     if (!targets.length) return;
     const targetOn = !targets.some(e => this.isOn(e));
-    this.setOptimistic(targets, targetOn ? "on" : "off", 10000);
+    this.setOptimistic(targets, targetOn ? "on" : "off", 1800);
     this.render();
     try {
-      await this.service("homeassistant", targetOn ? "turn_on" : "turn_off", { entity_id: targets });
+      await this.turnEntities(targets, targetOn);
+      this.reconcileSoon(targets, 1100);
     } catch (err) {
       targets.forEach(entity => this._optimistic.delete(entity));
       this.render();
@@ -249,9 +274,9 @@ class GlassDashboardCard extends HTMLElement {
       ...this.entities.mainLights,...this.entities.bedroomLights,
       ...this.entities.gameLights,...this.entities.utilityLights,
     ]);
-    this.setOptimistic(targets, "off", 10000);
+    this.setOptimistic(targets, "off", 1800);
     this.render();
-    this.service("homeassistant","turn_off",{ entity_id: targets }).catch(err => {
+    this.turnEntities(targets, false).then(() => this.reconcileSoon(targets, 1100)).catch(err => {
       targets.forEach(entity => this._optimistic.delete(entity));
       this.render();
       console.warn("[GlassDash] all-off failed:", err);
@@ -1077,7 +1102,7 @@ class GlassDashboardCard extends HTMLElement {
   <div class="bg"></div>
 
   <div class="topbar z1">
-    <div>
+    <div class="greeting-wrap">
       <div class="home-lbl" id="greeting">${this.greeting()}</div>
     </div>
     <div class="topbar-right">
@@ -1809,6 +1834,9 @@ class GlassDashboardCard extends HTMLElement {
             <stop offset="100%" stop-color="rgba(96,165,250,.12)"/>
           </linearGradient>
         </defs>
+        <path d="M28,${top} L${W-28},${top}" stroke="rgba(255,255,255,.06)" stroke-width="1"/>
+        <path d="M28,${(top + bottom) / 2} L${W-28},${(top + bottom) / 2}" stroke="rgba(255,255,255,.05)" stroke-width="1"/>
+        <path d="M28,${bottom} L${W-28},${bottom}" stroke="rgba(255,255,255,.06)" stroke-width="1"/>
         <path d="${bandPath}" fill="url(#wxBand)"/>
         ${lowSegments}
         ${segments}
@@ -1820,21 +1848,22 @@ class GlassDashboardCard extends HTMLElement {
 
   lightItem(entity) {
     const name = (this.attr(entity,"friendly_name",null) || entity.split(".")[1]?.replace(/_/g," ") || entity);
+    const available = this.isAvailable(entity);
     const on   = this.isOn(entity);
     const isLt = entity.startsWith("light.");
-    const canColor = this.isAvailable(entity) && this.supportsColor(entity);
+    const canColor = available && this.supportsColor(entity);
     const braw = isLt ? this.attr(entity,"brightness",null) : null;
     const bPct = braw !== null ? Math.max(1, Math.round(braw / 255 * 100)) : (on ? 100 : null);
     const icon = isLt ? (on?"mdi:lightbulb":"mdi:lightbulb-outline")
                : entity.includes("feeder") ? "mdi:food-drumstick-outline"
                : "mdi:toggle-switch-outline";
-    return `<div class="light-item ${on?"on":""}">
+    return `<div class="light-item ${on?"on":""} ${available?"":"unavailable"}">
       <button class="li-toggle" data-entity="${entity}">
         <div class="li-left">
           <ha-icon class="li-ico" icon="${icon}"></ha-icon>
           <div>
             <div class="li-name">${name}</div>
-            <div class="li-sub">${on?(bPct!=null?bPct+"%":"On"):"Off"}</div>
+            <div class="li-sub">${available ? (on?(bPct!=null?bPct+"%":"On"):"Off") : "Unavailable"}</div>
           </div>
         </div>
         <div class="lisw"></div>
@@ -2033,10 +2062,11 @@ button{font:inherit;color:inherit;border:0;text-align:inherit;cursor:pointer;bac
 .block{padding:9px}
 
 /* Topbar */
-.topbar{display:flex;align-items:flex-start;justify-content:space-between;padding:max(32px,env(safe-area-inset-top)) 14px 2px;z-index:50;isolation:isolate;flex-shrink:0}
-.home-lbl{font-size:15px;font-weight:800;color:rgba(255,255,255,.64);letter-spacing:1.2px;text-transform:uppercase;padding-top:2px}
+.topbar{display:flex;align-items:flex-end;justify-content:space-between;padding:max(20px,calc(env(safe-area-inset-top) - 2px)) 14px 2px;z-index:50;isolation:isolate;flex-shrink:0;min-height:64px}
+.greeting-wrap{display:flex;align-items:flex-end;min-height:34px;padding-bottom:2px}
+.home-lbl{font-size:24px;font-weight:800;color:rgba(255,255,255,.68);letter-spacing:1.2px;text-transform:uppercase;line-height:1}
 .home-sub{font-size:11px;color:rgba(255,255,255,.38);margin-top:0}
-.topbar-right{display:flex;align-items:center;gap:9px}
+.topbar-right{display:flex;align-items:flex-start;gap:9px}
 .clock-wrap{text-align:right}
 .clk-time{font-size:36px;font-weight:200;color:rgba(255,255,255,.94);letter-spacing:-1.4px;line-height:.9}
 .clk-date{font-size:14px;color:rgba(255,255,255,.56);margin-top:4px}
@@ -2209,7 +2239,7 @@ button.is-pressed{transform:scale(.93)!important;filter:brightness(1.2)}
 .wxg-label{font-size:9px;color:rgba(255,255,255,.52);text-transform:uppercase;letter-spacing:.45px;font-weight:800}
 .wxg-icon{--mdc-icon-size:17px;filter:drop-shadow(0 2px 5px rgba(0,0,0,.35))}
 .wxg-rain{font-size:9px;color:rgba(96,165,250,.88);font-weight:800}
-.wxg-svg{position:absolute;left:0;right:0;top:28px;bottom:0;width:100%;height:auto;display:block;overflow:visible}
+.wxg-svg{position:absolute;left:0;right:0;top:28px;width:100%;height:76px;display:block;overflow:visible}
 .wx-temp-label{position:absolute;z-index:3;transform:translateX(-50%);font-weight:800;line-height:1;letter-spacing:0;text-shadow:0 2px 5px rgba(5,8,24,.8),0 0 8px rgba(5,8,24,.7);white-space:nowrap;pointer-events:none}
 .wx-temp-label.hi{font-size:18px;color:rgba(255,255,255,.95)}
 .wx-temp-label.lo{font-size:14px;color:rgba(191,219,254,.84)}
@@ -2285,6 +2315,7 @@ button.is-pressed{transform:scale(.93)!important;filter:brightness(1.2)}
 .light-item{border-radius:11px;border:1px solid rgba(255,255,255,.1);background:rgba(255,255,255,.06);transition:background .18s,border-color .18s,box-shadow .18s,transform .08s;overflow:hidden}
 .light-item:hover{background:rgba(255,255,255,.09)}
 .light-item.on{background:rgba(167,139,250,.13);border-color:rgba(167,139,250,.3);box-shadow:0 0 7px rgba(167,139,250,.13)}
+.light-item.unavailable{opacity:.56}
 .li-toggle{width:100%;display:flex;align-items:center;justify-content:space-between;padding:8px 11px;background:none;border:0!important;cursor:pointer;gap:8px;min-width:0}
 .li-left{display:flex;align-items:center;gap:8px;min-width:0;flex:1}
 .li-ico{--mdc-icon-size:15px;color:rgba(255,255,255,.5);flex-shrink:0}
