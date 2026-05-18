@@ -1105,7 +1105,18 @@ class GlassDashboardCard extends HTMLElement {
     <div class="greeting-wrap">
       <div class="home-lbl" id="greeting">${this.greeting()}</div>
     </div>
-    <div class="topbar-right">
+  </div>
+
+  <div class="tabs z1">
+    <div class="tabs-scroll">
+      ${this.tab("ov",   "mdi:view-dashboard-outline","Overview")}
+      ${this.tab("liv",  "mdi:sofa-outline",          "Living Room")}
+      ${this.tab("bed",  "mdi:bed-king-outline",       "Bedroom")}
+      ${this.tab("game", "mdi:gamepad-variant-outline","Game Room")}
+      ${this.tab("toon", "mdi:cat",                   "Toon's Room")}
+      ${this.tab("util", "mdi:home-floor-1",          "Utility")}
+    </div>
+    <div class="tabs-right">
       <button class="fs-btn" data-action="sleep" title="Sleep screen">
         <ha-icon icon="mdi:weather-night"></ha-icon>
       </button>
@@ -1117,15 +1128,6 @@ class GlassDashboardCard extends HTMLElement {
         <div class="clk-date" id="clk-d">Thu, 14 May</div>
       </div>
     </div>
-  </div>
-
-  <div class="tabs z1">
-    ${this.tab("ov",   "mdi:view-dashboard-outline","Overview")}
-    ${this.tab("liv",  "mdi:sofa-outline",          "Living Room")}
-    ${this.tab("bed",  "mdi:bed-king-outline",       "Bedroom")}
-    ${this.tab("game", "mdi:gamepad-variant-outline","Game Room")}
-    ${this.tab("toon", "mdi:cat",                   "Toon's Room")}
-    ${this.tab("util", "mdi:home-floor-1",          "Utility")}
   </div>
   <div class="divider z1"></div>
 
@@ -1813,10 +1815,13 @@ class GlassDashboardCard extends HTMLElement {
         <circle cx="${lx.toFixed(1)}" cy="${ly.toFixed(1)}" r="3.2" fill="rgba(147,197,253,.92)" stroke="rgba(5,8,24,.45)" stroke-width="1"/>
       </g>`;
     }).join("");
+    // SVG is positioned at top:34px inside .wx-graph; viewBox H=76 maps 1:1 to 76px
     const tempLabels = parsed.map((d, i) => {
       const left = (x(i) / W * 100).toFixed(2);
-      return `<div class="wx-temp-label hi" style="left:${left}%">${d.hi}°</div>
-        <div class="wx-temp-label lo" style="left:${left}%">${d.lo}°</div>`;
+      const hiTop = (34 + hiPts[i][1] - 18).toFixed(1); // above hi dot
+      const loTop = (34 + loPts[i][1] + 5).toFixed(1);  // below lo dot
+      return `<div class="wx-temp-label hi" style="left:${left}%;top:${hiTop}px">${d.hi}°</div>
+        <div class="wx-temp-label lo" style="left:${left}%;top:${loTop}px">${d.lo}°</div>`;
     }).join("");
     const dayNodes = parsed.map((d, i) => {
       const ca = condAccent[d.cond] || condAccent.partlycloudy;
@@ -2065,21 +2070,22 @@ button{font:inherit;color:inherit;border:0;text-align:inherit;cursor:pointer;bac
 .block{padding:9px}
 
 /* Topbar */
-.topbar{display:flex;align-items:flex-end;justify-content:space-between;padding:max(20px,calc(env(safe-area-inset-top) - 2px)) 14px 2px;z-index:50;isolation:isolate;flex-shrink:0;min-height:64px}
+.topbar{display:flex;align-items:flex-end;justify-content:space-between;padding:max(20px,calc(env(safe-area-inset-top) - 2px)) 14px 4px;z-index:50;isolation:isolate;flex-shrink:0;min-height:56px}
 .greeting-wrap{display:flex;align-items:flex-end;min-height:34px;padding-bottom:2px}
 .home-lbl{font-size:24px;font-weight:800;color:rgba(255,255,255,.68);letter-spacing:1.2px;text-transform:uppercase;line-height:1}
 .home-sub{font-size:11px;color:rgba(255,255,255,.38);margin-top:0}
-.topbar-right{display:flex;align-items:flex-start;gap:9px}
+.tabs-right{display:flex;align-items:center;gap:9px;margin-left:auto;padding-left:10px;flex-shrink:0}
 .clock-wrap{text-align:right}
-.clk-time{font-size:36px;font-weight:200;color:rgba(255,255,255,.94);letter-spacing:-1.4px;line-height:.9}
-.clk-date{font-size:14px;color:rgba(255,255,255,.56);margin-top:4px}
+.clk-time{font-size:28px;font-weight:200;color:rgba(255,255,255,.94);letter-spacing:-1.2px;line-height:1}
+.clk-date{font-size:11px;color:rgba(255,255,255,.5);margin-top:1px}
 .fs-btn{display:flex;align-items:center;justify-content:center;width:30px;height:30px;border-radius:50%;background:rgba(255,255,255,.07);border:1px solid rgba(255,255,255,.12)!important;transition:all .15s,transform .08s;flex-shrink:0}
 .fs-btn:hover{background:rgba(255,255,255,.13)}
 .fs-btn ha-icon{--mdc-icon-size:16px;color:rgba(255,255,255,.6)}
 
 /* Tabs */
-.tabs{display:flex;gap:4px;padding:0 10px 7px;overflow-x:auto;scrollbar-width:none;position:relative;z-index:45;flex-shrink:0;background:transparent}
-.tabs::-webkit-scrollbar{display:none}
+.tabs{display:flex;padding:0 10px 7px;position:relative;z-index:45;flex-shrink:0;background:transparent;align-items:center;gap:0}
+.tabs-scroll{display:flex;gap:4px;overflow-x:auto;scrollbar-width:none;flex:1;align-items:center;min-width:0}
+.tabs-scroll::-webkit-scrollbar{display:none}
 .tab{flex-shrink:0;display:flex;align-items:center;gap:6px;padding:5px 11px;border-radius:18px;font-size:12px;font-weight:800;color:rgba(255,255,255,.52);border:1px solid rgba(255,255,255,.06);background:rgba(255,255,255,.05);transition:all .18s,transform .08s;white-space:nowrap}
 .tab ha-icon{--mdc-icon-size:15px;opacity:.7}
 .tab:hover{color:rgba(255,255,255,.70);background:rgba(255,255,255,.09)}
@@ -2236,16 +2242,16 @@ button.is-pressed{transform:scale(.93)!important;filter:brightness(1.2)}
 .wxdh{font-size:16px;font-weight:700;color:rgba(255,255,255,.88)}
 .wxdl{font-size:12px;color:rgba(255,255,255,.47);margin-top:1px}
 .wx-precip{font-size:10px;color:rgba(96,165,250,.8);margin-top:2px;font-weight:700}
-.wx-graph{position:relative;height:126px;border-radius:11px;overflow:hidden;background:linear-gradient(180deg,rgba(255,255,255,.055),rgba(255,255,255,.025));border:1px solid rgba(255,255,255,.075);padding-top:30px}
+.wx-graph{position:relative;height:130px;border-radius:11px;overflow:hidden;background:linear-gradient(180deg,rgba(255,255,255,.055),rgba(255,255,255,.025));border:1px solid rgba(255,255,255,.075);padding-top:30px}
 .wxg-days{position:absolute;left:0;right:0;top:7px;height:26px;z-index:4}
 .wxg-day{position:absolute;top:0;transform:translateX(-50%);display:flex;align-items:center;gap:5px;min-width:62px;justify-content:center;white-space:nowrap}
 .wxg-label{font-size:9px;color:rgba(255,255,255,.52);text-transform:uppercase;letter-spacing:.45px;font-weight:800}
 .wxg-icon{--mdc-icon-size:17px;filter:drop-shadow(0 2px 5px rgba(0,0,0,.35))}
 .wxg-rain{font-size:9px;color:rgba(96,165,250,.88);font-weight:800}
 .wxg-svg{position:absolute;left:0;right:0;top:34px;width:100%;height:76px;display:block;overflow:visible}
-.wx-temp-label{position:absolute;z-index:5;transform:translateX(-50%);font-weight:800;line-height:1;letter-spacing:0;text-shadow:0 2px 5px rgba(5,8,24,.85),0 0 8px rgba(5,8,24,.65);white-space:nowrap;pointer-events:none}
-.wx-temp-label.hi{top:40px;font-size:19px;color:rgba(255,255,255,.96)}
-.wx-temp-label.lo{bottom:9px;font-size:15px;color:rgba(191,219,254,.86)}
+.wx-temp-label{position:absolute;z-index:5;transform:translateX(-50%) translateY(-50%);font-weight:800;line-height:1;letter-spacing:0;text-shadow:0 2px 6px rgba(5,8,24,.9),0 0 10px rgba(5,8,24,.7);white-space:nowrap;pointer-events:none}
+.wx-temp-label.hi{font-size:17px;color:rgba(255,255,255,.96)}
+.wx-temp-label.lo{font-size:13px;color:rgba(147,197,253,.9)}
 @keyframes cloud-drift-1{from{transform:translateX(-10px) rotate(-8deg)}to{transform:translateX(18px) rotate(-6deg)}}
 @keyframes cloud-drift-2{from{transform:translateX(16px)}to{transform:translateX(-20px)}}
 @keyframes cloud-drift-3{from{transform:translateX(-14px)}to{transform:translateX(14px)}}
