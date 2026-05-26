@@ -1050,7 +1050,10 @@ class GlassDashboardCard extends HTMLElement {
       timeZone: "Europe/Amsterdam",
     }).formatToParts(new Date());
     const h = Number(parts.find(part => part.type === "hour")?.value ?? new Date().getHours());
-    return h >= 5 && h < 12 ? "Good morning" : h < 18 ? "Good afternoon" : "Good evening";
+    if (h >= 5 && h < 12) return "Good morning";
+    if (h >= 12 && h < 17) return "Good afternoon";
+    if (h >= 17 && h < 22) return "Good evening";
+    return "Good night";
   }
   toggleFullscreen() {
     if (!document.fullscreenElement) {
