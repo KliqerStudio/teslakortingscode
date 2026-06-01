@@ -37,7 +37,6 @@ class GlassDashboardCard extends HTMLElement {
         "light.lounge_light","light.living_room","light.reading_light",
         "light.dining_room","light.led_keuken_boven","light.led_keuken_onder",
         "light.marylin","light.govee_tv_left","light.govee_tv_right",
-        "light.rgbic_tv_backlight",
       ],
       bedroomLights: ["light.bed","light.kast","light.closet","light.ants_closet","light.watch_light"],
       gameLights: [
