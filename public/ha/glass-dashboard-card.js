@@ -25,6 +25,7 @@ class GlassDashboardCard extends HTMLElement {
     this._colorPickerOpenUntil = 0;
     this._energy = { prefs: null, stats: {}, period: "day", loadedAt: {}, loading: false, loadingPeriods: new Set() };
     this._energyRate = 0.29; // €/kWh — change to match your contract
+    this._agenda = { events: [], loading: false, loadedAt: 0, calendarsKey: "" };
     // Presence detection
     this._presence = {
       stream: null, video: null, canvas: null, ctx: null,
@@ -105,6 +106,7 @@ class GlassDashboardCard extends HTMLElement {
     this.loadForecast();
     this.loadHistory();
     this.loadEnergy();
+    this.loadAgenda();
     // Only re-render when relevant entity states actually changed.
     // This prevents the Tesla image (and everything else) from flickering
     // every time HA sends ANY state update (which can be every few seconds).
@@ -134,6 +136,7 @@ class GlassDashboardCard extends HTMLElement {
       e.p1Power, e.p1Return, e.p1EnergyToday,
       e.vattenfallElectricityPrice, e.vattenfallGasPrice,
       e.archerDown, e.archerUp, e.archerWan,
+      ...this.calendarEntities(), ...this.fitEntities(), ...this.stockEntities(),
     ];
     return watch.filter(Boolean).map(k => {
       const s = this._hass.states?.[k];
@@ -560,6 +563,47 @@ class GlassDashboardCard extends HTMLElement {
     }
   }
 
+  async loadAgenda() {
+    if (!this._hass?.callWS) return;
+    const calendars = this.calendarEntities();
+    const key = calendars.join("|");
+    if (!calendars.length) {
+      if (this._agenda.events.length || this._agenda.calendarsKey) {
+        this._agenda = { ...this._agenda, events: [], calendarsKey: "", loadedAt: Date.now() };
+        this.render();
+      }
+      return;
+    }
+    if (this._agenda.loading) return;
+    if (this._agenda.calendarsKey === key && Date.now() - this._agenda.loadedAt < 300000) return;
+    this._agenda.loading = true;
+    try {
+      const start = new Date();
+      const end = new Date(Date.now() + 7 * 24 * 3600 * 1000);
+      const results = await Promise.allSettled(calendars.map(entity_id =>
+        this._hass.callWS({
+          type: "calendar/get_events",
+          entity_id,
+          start: start.toISOString(),
+          end: end.toISOString(),
+        }).then(result => ({ entity_id, result }))
+      ));
+      const events = [];
+      for (const item of results) {
+        if (item.status !== "fulfilled") continue;
+        const { entity_id, result } = item.value;
+        const list = result?.events || result?.[entity_id]?.events || [];
+        list.forEach(event => events.push({ ...event, calendar: entity_id }));
+      }
+      events.sort((a, b) => new Date(a.start?.dateTime || a.start?.date || 0) - new Date(b.start?.dateTime || b.start?.date || 0));
+      this._agenda = { events: events.slice(0, 8), loading: false, loadedAt: Date.now(), calendarsKey: key };
+      this.render();
+    } catch (err) {
+      console.warn("[GlassDash] Agenda load failed:", err);
+      this._agenda = { ...this._agenda, loading: false, loadedAt: Date.now(), calendarsKey: key };
+    }
+  }
+
   // ── Camera (stable refresh, no flicker) ──────────────────────────────────────
   updateCamera() {
     if (!this._hass) return;
@@ -628,6 +672,45 @@ class GlassDashboardCard extends HTMLElement {
     if (!secs || secs < 0) return "0:00";
     const s = Math.round(secs), m = Math.floor(s/60);
     return `${m}:${String(s%60).padStart(2,"0")}`;
+  }
+  esc(value) {
+    return String(value ?? "").replace(/[&<>"']/g, ch => ({
+      "&": "&amp;", "<": "&lt;", ">": "&gt;", "\"": "&quot;", "'": "&#39;",
+    }[ch]));
+  }
+  stateEntities() {
+    return Object.values(this._hass?.states || {});
+  }
+  entityName(entity) {
+    return this.attr(entity, "friendly_name", null) || entity.split(".")[1]?.replace(/_/g, " ") || entity;
+  }
+  calendarEntities() {
+    return this.stateEntities()
+      .filter(s => s.entity_id?.startsWith("calendar."))
+      .map(s => s.entity_id)
+      .sort();
+  }
+  fitEntities() {
+    const include = /\b(google[_ ]?fit|fitbit|steps?|step_count|calor(?:ie|ies)|active[_ ]?minutes?|heart[_ ]?rate|sleep|body[_ ]?weight|distance[_ ]?walked|move[_ ]?minutes?)\b/i;
+    return this.stateEntities()
+      .filter(s => s.entity_id?.startsWith("sensor."))
+      .filter(s => include.test(`${s.entity_id} ${s.attributes?.friendly_name || ""}`))
+      .map(s => s.entity_id)
+      .sort()
+      .slice(0, 8);
+  }
+  stockEntities() {
+    const include = /\b(etoro|portfolio|stock|stocks|ticker|share|shares|equity|nasdaq|nyse|sp500|s&p|crypto|investment)\b/i;
+    const exclude = /\b(vattenfall|stroom|gas|p1|energy|electricity|charger|charge)\b/i;
+    return this.stateEntities()
+      .filter(s => s.entity_id?.startsWith("sensor."))
+      .filter(s => {
+        const text = `${s.entity_id} ${s.attributes?.friendly_name || ""}`;
+        return include.test(text) && !exclude.test(text);
+      })
+      .map(s => s.entity_id)
+      .sort()
+      .slice(0, 8);
   }
   aqLabel(val) {
     const n = Number(val);
@@ -1161,6 +1244,7 @@ class GlassDashboardCard extends HTMLElement {
       ${this.tab("game", "mdi:gamepad-variant-outline","Game Room")}
       ${this.tab("toon", "mdi:cat",                   "Toon's Room")}
       ${this.tab("util", "mdi:home-floor-1",          "Utility")}
+      ${this.tab("me",   "mdi:account-circle-outline","Me")}
     </div>
     <div class="tabs-right">
       <button class="fs-btn" data-action="sleep" title="Sleep screen">
@@ -1217,6 +1301,7 @@ class GlassDashboardCard extends HTMLElement {
   ${this.roomPage("game","Game Room","Office · Gaming",e.gameLights)}
   ${this.toonPage(camSrc)}
   ${this.roomPage("util","Utility","Toilet · Hallway/Door",e.utilityLights)}
+  ${this.personalPage()}
 </div>
 <div class="presence-overlay ${this._presence.dimmed ? "dimmed" : ""}" data-action="presence-wake">
   <div class="presence-clock">
@@ -2070,6 +2155,105 @@ class GlassDashboardCard extends HTMLElement {
     </section>`;
   }
 
+  personalPage() {
+    return `<div class="page ${this._tab==="me"?"active":""} z1">
+      <div class="g2 personal-grid">
+        <div class="col">
+          ${this.agendaSection()}
+        </div>
+        <div class="col">
+          ${this.fitSection()}
+          ${this.stocksSection()}
+        </div>
+      </div>
+    </div>`;
+  }
+
+  agendaSection() {
+    const calendars = this.calendarEntities();
+    const events = this._agenda.events || [];
+    const body = calendars.length
+      ? events.length
+        ? `<div class="agenda-list">${events.map(event => this.agendaItem(event)).join("")}</div>`
+        : `<div class="personal-empty"><ha-icon icon="mdi:calendar-check-outline"></ha-icon><b>${this._agenda.loading ? "Loading agenda" : "No agenda items"}</b><span>${this._agenda.loading ? "Checking Google Calendar..." : "Nothing scheduled in the next 7 days."}</span></div>`
+      : `<div class="personal-empty"><ha-icon icon="mdi:calendar-plus"></ha-icon><b>Google Calendar not connected</b><span>Add the Google Calendar integration in Home Assistant; this tab will fill itself automatically.</span></div>`;
+    return `<section class="gl block personal-card agenda-card">
+      <div class="slbl">Google Calendar · Agenda</div>
+      ${body}
+    </section>`;
+  }
+
+  agendaItem(event) {
+    const start = event.start?.dateTime || event.start?.date || event.start;
+    const allDay = Boolean(event.start?.date && !event.start?.dateTime);
+    const dt = start ? new Date(start) : null;
+    const valid = dt && Number.isFinite(dt.getTime());
+    const day = valid ? this.relativeDay(dt) : "--";
+    const time = valid && !allDay
+      ? dt.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", timeZone: "Europe/Amsterdam" })
+      : "All day";
+    return `<div class="agenda-item">
+      <div class="agenda-time"><b>${this.esc(time)}</b><span>${this.esc(day)}</span></div>
+      <div class="agenda-main">
+        <b>${this.esc(event.summary || event.title || "Calendar item")}</b>
+        <span>${this.esc(this.entityName(event.calendar || ""))}</span>
+      </div>
+    </div>`;
+  }
+
+  relativeDay(date) {
+    const now = new Date();
+    const local = d => new Date(d.toLocaleDateString("en-US", { timeZone: "Europe/Amsterdam" }));
+    const diff = Math.round((local(date) - local(now)) / 86400000);
+    if (diff === 0) return "Today";
+    if (diff === 1) return "Tomorrow";
+    return date.toLocaleDateString([], { weekday: "short", day: "numeric", month: "short", timeZone: "Europe/Amsterdam" });
+  }
+
+  fitSection() {
+    const entities = this.fitEntities();
+    const body = entities.length
+      ? `<div class="personal-metrics">${entities.map((entity, idx) => this.personalMetric(entity, this.fitIcon(entity), idx)).join("")}</div>`
+      : `<div class="personal-empty compact"><ha-icon icon="mdi:heart-pulse"></ha-icon><b>Google Fit not connected</b><span>Expose steps, calories, sleep, or heart-rate sensors in Home Assistant.</span></div>`;
+    return `<section class="gl block personal-card">
+      <div class="slbl">Google Fit</div>
+      ${body}
+    </section>`;
+  }
+
+  stocksSection() {
+    const entities = this.stockEntities();
+    const body = entities.length
+      ? `<div class="personal-metrics stocks">${entities.map((entity, idx) => this.personalMetric(entity, "mdi:chart-line", idx)).join("")}</div>`
+      : `<div class="personal-empty compact"><ha-icon icon="mdi:chart-areaspline"></ha-icon><b>eToro stocks not connected</b><span>Add portfolio or stock price sensors in Home Assistant and they will appear here.</span></div>`;
+    return `<section class="gl block personal-card">
+      <div class="slbl">Stocks · eToro</div>
+      ${body}
+    </section>`;
+  }
+
+  fitIcon(entity) {
+    const text = `${entity} ${this.entityName(entity)}`.toLowerCase();
+    if (text.includes("step")) return "mdi:shoe-print";
+    if (text.includes("calor")) return "mdi:fire";
+    if (text.includes("heart")) return "mdi:heart-pulse";
+    if (text.includes("sleep")) return "mdi:sleep";
+    if (text.includes("distance")) return "mdi:map-marker-distance";
+    if (text.includes("weight")) return "mdi:scale-bathroom";
+    return "mdi:google-fit";
+  }
+
+  personalMetric(entity, icon, idx = 0) {
+    const raw = this.st(entity, "--");
+    const n = Number(raw);
+    const unit = this.attr(entity, "unit_of_measurement", "");
+    const value = Number.isFinite(n) ? (Math.abs(n) >= 100 ? Math.round(n).toLocaleString() : n.toFixed(Math.abs(n) >= 10 ? 1 : 2)) : raw;
+    return `<div class="personal-metric m${idx % 4}">
+      <ha-icon icon="${icon}"></ha-icon>
+      <div><b>${this.esc(value)}${unit ? `<small> ${this.esc(unit)}</small>` : ""}</b><span>${this.esc(this.entityName(entity))}</span></div>
+    </div>`;
+  }
+
   roomPage(id, title, sub, entities, temp, humidity, air, pm25) {
     const rk = id==="liv"?"main":id==="bed"?"bedroom":id==="game"?"game":"utility";
     const sideContent = temp
@@ -2218,6 +2402,32 @@ button{font:inherit;color:inherit;border:0;text-align:inherit;cursor:pointer;bac
 .ov-main{display:grid;grid-template-columns:1fr 1fr;gap:6px}
 .g2{display:grid;grid-template-columns:1fr 1fr;gap:6px;width:100%}
 .col{display:flex;flex-direction:column;gap:6px;min-width:0}
+.personal-grid{align-items:start}
+.personal-card{min-height:0}
+.agenda-card{min-height:300px}
+.agenda-list{display:flex;flex-direction:column;gap:7px}
+.agenda-item{display:grid;grid-template-columns:82px 1fr;gap:9px;align-items:center;padding:9px;border-radius:12px;background:rgba(255,255,255,.055);border:1px solid rgba(255,255,255,.09)}
+.agenda-time{display:flex;flex-direction:column;gap:2px;align-items:flex-start}
+.agenda-time b{font-size:16px;color:rgba(255,255,255,.94);line-height:1}
+.agenda-time span{font-size:9px;color:rgba(167,139,250,.88);text-transform:uppercase;letter-spacing:.55px;font-weight:800;white-space:nowrap}
+.agenda-main{min-width:0}
+.agenda-main b{display:block;font-size:14px;color:rgba(255,255,255,.88);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.agenda-main span{display:block;font-size:10px;color:rgba(255,255,255,.38);margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;text-transform:capitalize}
+.personal-metrics{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:7px}
+.personal-metrics.stocks{grid-template-columns:1fr}
+.personal-metric{display:flex;align-items:center;gap:10px;min-height:66px;padding:10px;border-radius:12px;background:linear-gradient(135deg,rgba(255,255,255,.075),rgba(255,255,255,.035));border:1px solid rgba(255,255,255,.09)}
+.personal-metric ha-icon{--mdc-icon-size:24px;color:#a78bfa;filter:drop-shadow(0 0 9px rgba(167,139,250,.35));flex-shrink:0}
+.personal-metric.m1 ha-icon{color:#34d399;filter:drop-shadow(0 0 9px rgba(52,211,153,.35))}
+.personal-metric.m2 ha-icon{color:#60a5fa;filter:drop-shadow(0 0 9px rgba(96,165,250,.35))}
+.personal-metric.m3 ha-icon{color:#fbbf24;filter:drop-shadow(0 0 9px rgba(251,191,36,.30))}
+.personal-metric b{display:block;font-size:19px;color:rgba(255,255,255,.94);letter-spacing:-.4px;line-height:1.05}
+.personal-metric small{font-size:10px;color:rgba(255,255,255,.46);font-weight:600;letter-spacing:0}
+.personal-metric span{display:block;font-size:9px;color:rgba(255,255,255,.42);margin-top:3px;text-transform:uppercase;letter-spacing:.35px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.personal-empty{min-height:190px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:7px;text-align:center;padding:20px;border-radius:12px;background:rgba(255,255,255,.04);border:1px dashed rgba(255,255,255,.12)}
+.personal-empty.compact{min-height:116px}
+.personal-empty ha-icon{--mdc-icon-size:34px;color:rgba(167,139,250,.72)}
+.personal-empty b{font-size:15px;color:rgba(255,255,255,.82)}
+.personal-empty span{max-width:360px;font-size:11px;line-height:1.45;color:rgba(255,255,255,.45)}
 
 /* Press/active */
 button{transition:transform .08s ease,filter .08s ease,box-shadow .1s}
