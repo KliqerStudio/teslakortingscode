@@ -2555,7 +2555,7 @@ button{font:inherit;color:inherit;border:0;text-align:inherit;cursor:pointer;bac
 
 /* Shell — full viewport, no max-width */
 .dash{width:100%;height:100dvh;min-height:100vh;max-width:none;border-radius:0;display:flex;flex-direction:column;font-family:-apple-system,BlinkMacSystemFont,"SF Pro Display",system-ui,sans-serif;position:relative;background:#060818;overflow-y:auto;overflow-x:hidden;-webkit-overflow-scrolling:touch;overscroll-behavior:contain}
-.bg{position:absolute;inset:0;pointer-events:none}
+.bg{position:fixed;top:-4vh;right:-4vw;bottom:-4vh;left:-4vw;pointer-events:none;transform:scale(1.02);transform-origin:center center;will-change:transform}
 .bg.night{background:radial-gradient(ellipse 80% 60% at 15% 85%,rgba(0,180,255,.42),transparent 55%),radial-gradient(ellipse 60% 50% at 80% 10%,rgba(130,60,255,.38),transparent 55%),radial-gradient(ellipse 50% 40% at 50% 50%,rgba(30,10,80,.8),transparent 70%),linear-gradient(160deg,#06091c 0%,#0b0630 40%,#050c1e 100%)}
 .bg.night::after{content:"";position:absolute;inset:0;background:radial-gradient(ellipse 30% 20% at 10% 70%,rgba(0,220,255,.22),transparent 50%)}
 .bg.day{background-image:linear-gradient(180deg,rgba(244,251,255,.08),rgba(3,8,23,.14)),linear-gradient(160deg,rgba(9,20,44,.18),rgba(9,20,44,.34)),url("https://teslakortingscode.com/ha/daytime-bg.png");background-size:cover;background-position:center center;background-repeat:no-repeat}
