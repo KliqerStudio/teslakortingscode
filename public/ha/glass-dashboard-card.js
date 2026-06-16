@@ -26,6 +26,7 @@ class GlassDashboardCard extends HTMLElement {
     this._energy = { prefs: null, stats: {}, period: "day", loadedAt: {}, loading: false, loadingPeriods: new Set() };
     this._energyRate = 0.29; // €/kWh — change to match your contract
     this._agenda = { events: [], loading: false, loadedAt: 0, calendarsKey: "" };
+    this._worldCup = { matches: [], groups: [], featured: null, loading: false, loadedAt: 0, error: "" };
     // Presence detection
     this._presence = {
       stream: null, video: null, canvas: null, ctx: null,
@@ -89,11 +90,15 @@ class GlassDashboardCard extends HTMLElement {
     if (!this._camTimer) {
       this._camTimer = window.setInterval(() => this.updateCamera(), 5000);
     }
+    if (!this._wcTimer) {
+      this._wcTimer = window.setInterval(() => this.loadWorldCup(), 120000);
+    }
   }
 
   disconnectedCallback() {
     if (this._timer)    { window.clearInterval(this._timer);    this._timer    = null; }
     if (this._camTimer) { window.clearInterval(this._camTimer); this._camTimer = null; }
+    if (this._wcTimer)  { window.clearInterval(this._wcTimer);  this._wcTimer  = null; }
     if (this._noticeTimer) window.clearTimeout(this._noticeTimer);
     this._audioCtx?.close?.();
     this._audioCtx = null;
@@ -106,6 +111,7 @@ class GlassDashboardCard extends HTMLElement {
     this.loadHistory();
     this.loadEnergy();
     this.loadAgenda();
+    this.loadWorldCup();
     // Only re-render when relevant entity states actually changed.
     // This prevents the Tesla image (and everything else) from flickering
     // every time HA sends ANY state update (which can be every few seconds).
@@ -603,6 +609,41 @@ class GlassDashboardCard extends HTMLElement {
     }
   }
 
+  async loadWorldCup(force = false) {
+    if (this._worldCup.loading) return;
+    if (!force && this._worldCup.loadedAt && Date.now() - this._worldCup.loadedAt < 120000) return;
+    this._worldCup.loading = true;
+    this._worldCup.error = "";
+    try {
+      const url = `${this.remoteBase()}/api/worldcup${force ? `?t=${Date.now()}` : ""}`;
+      const resp = await fetch(url, {
+        cache: "no-store",
+        mode: "cors",
+        headers: { Accept: "application/json" },
+      });
+      if (!resp.ok) throw new Error(`World Cup feed returned ${resp.status}`);
+      const data = await resp.json();
+      this._worldCup = {
+        matches: Array.isArray(data?.matches) ? data.matches : [],
+        groups: Array.isArray(data?.groups) ? data.groups : [],
+        featured: data?.featured || null,
+        loading: false,
+        loadedAt: Date.now(),
+        error: "",
+      };
+      this.render();
+    } catch (err) {
+      console.warn("[GlassDash] World Cup load failed:", err);
+      this._worldCup = {
+        ...this._worldCup,
+        loading: false,
+        loadedAt: Date.now(),
+        error: String(err?.message || err || "Could not load World Cup data."),
+      };
+      this.render();
+    }
+  }
+
   // ── Camera (stable refresh, no flicker) ──────────────────────────────────────
   updateCamera() {
     if (!this._hass) return;
@@ -677,6 +718,12 @@ class GlassDashboardCard extends HTMLElement {
       "&": "&amp;", "<": "&lt;", ">": "&gt;", "\"": "&quot;", "'": "&#39;",
     }[ch]));
   }
+  remoteBase() {
+    return "https://teslakortingscode.com";
+  }
+  remoteAsset(path = "") {
+    return `${this.remoteBase()}${path.startsWith("/") ? path : `/${path}`}`;
+  }
   stateEntities() {
     return Object.values(this._hass?.states || {});
   }
@@ -710,6 +757,40 @@ class GlassDashboardCard extends HTMLElement {
       .map(s => s.entity_id)
       .sort()
       .slice(0, 8);
+  }
+  wcStatusLabel(match) {
+    const state = String(match?.state || "");
+    if (state === "in") return match?.clock || "Live";
+    if (state === "post") return "Final";
+    if (match?.kickoffLocal) {
+      const dt = new Date(match.kickoffLocal);
+      return dt.toLocaleString("en-GB", {
+        weekday: "short",
+        hour: "2-digit",
+        minute: "2-digit",
+        timeZone: "Europe/Amsterdam",
+      });
+    }
+    return match?.status || "Scheduled";
+  }
+  wcScore(match, side) {
+    const team = match?.teams?.find(t => t.side === side) || match?.teams?.[side === "home" ? 0 : 1];
+    return team?.score ?? "-";
+  }
+  wcTeam(match, side) {
+    const team = match?.teams?.find(t => t.side === side) || match?.teams?.[side === "home" ? 0 : 1];
+    return team?.short || team?.name || "--";
+  }
+  wcStatIcon(label) {
+    const text = String(label || "").toLowerCase();
+    if (text.includes("possession")) return "mdi:chart-donut";
+    if (text.includes("shot")) return "mdi:target";
+    if (text.includes("foul")) return "mdi:whistle";
+    if (text.includes("corner")) return "mdi:flag-outline";
+    if (text.includes("offside")) return "mdi:run-fast";
+    if (text.includes("save")) return "mdi:hand-back-right-outline";
+    if (text.includes("pass")) return "mdi:swap-horizontal";
+    return "mdi:soccer";
   }
   aqLabel(val) {
     const n = Number(val);
@@ -1226,8 +1307,8 @@ class GlassDashboardCard extends HTMLElement {
 
     const camSrc = this._lastCamUrl || (this._hass?.states?.[e.petFeederCamera]?.attributes?.entity_picture || "");
 
-    this.shadowRoot.innerHTML = `<style>${this.css()}</style><ha-card><div class="dash">
-  <div class="bg"></div>
+    this.shadowRoot.innerHTML = `<style>${this.css()}</style><ha-card><div class="dash ${this.isNightNow() ? "theme-night" : "theme-day"}">
+  <div class="bg ${this.isNightNow() ? "night" : "day"}"></div>
 
   <div class="topbar z1">
     <div class="greeting-wrap">
@@ -1244,6 +1325,7 @@ class GlassDashboardCard extends HTMLElement {
       ${this.tab("toon", "mdi:cat",                   "Toon's Room")}
       ${this.tab("util", "mdi:home-floor-1",          "Utility")}
       ${this.tab("me",   "mdi:account-circle-outline","Me")}
+      ${this.tab("wc",   "mdi:soccer",                "World Cup")}
     </div>
     <div class="tabs-right">
       <button class="fs-btn" data-action="sleep" title="Sleep screen">
@@ -1301,6 +1383,7 @@ class GlassDashboardCard extends HTMLElement {
   ${this.toonPage(camSrc)}
   ${this.roomPage("util","Utility","Toilet · Hallway/Door",e.utilityLights)}
   ${this.personalPage()}
+  ${this.worldCupPage()}
 </div>
 <div class="presence-overlay ${this._presence.dimmed ? "dimmed" : ""}" data-action="presence-wake">
   <div class="presence-clock">
@@ -1436,6 +1519,11 @@ class GlassDashboardCard extends HTMLElement {
       this._forecastLoadedAt = 0;
       this._forecast = [];
       this.loadForecast();
+      this.render();
+    });
+    this.shadowRoot.querySelector("[data-action='worldcup-refresh']")?.addEventListener("click", () => {
+      this._worldCup.loadedAt = 0;
+      this.loadWorldCup(true);
       this.render();
     });
 
@@ -2168,6 +2256,114 @@ class GlassDashboardCard extends HTMLElement {
     </div>`;
   }
 
+  worldCupPage() {
+    const featured = this._worldCup.featured;
+    const groups = this._worldCup.groups || [];
+    const matches = this._worldCup.matches || [];
+    return `<div class="page ${this._tab==="wc"?"active":""} z1">
+      <div class="g2 personal-grid">
+        <div class="col">
+          <section class="gl wc-card wc-hero">
+            <div class="wc-head">
+              <div>
+                <div class="slbl" style="margin:0">2026 FIFA World Cup</div>
+                <div class="wc-title">${featured?.state === "in" ? "Live Now" : "Match Centre"}</div>
+                <div class="wc-sub">${featured?.status || (this._worldCup.loading ? "Refreshing live data…" : "Live matches, scores, and group tables")}</div>
+              </div>
+              <button class="wc-refresh" data-action="worldcup-refresh" title="Refresh World Cup data">
+                <ha-icon icon="mdi:refresh"></ha-icon>
+              </button>
+            </div>
+            ${featured ? this.worldCupFeatured(featured) : `<div class="personal-empty compact"><ha-icon icon="mdi:soccer"></ha-icon><b>No World Cup match selected</b><span>${this._worldCup.loading ? "Loading the latest tournament feed…" : this.esc(this._worldCup.error || "Live match data is not available right now.")}</span></div>`}
+          </section>
+          <section class="gl wc-card">
+            <div class="slbl">Matches</div>
+            <div class="wc-match-list">
+              ${matches.length
+                ? matches.map(match => this.worldCupMatchRow(match)).join("")
+                : `<div class="personal-empty compact"><ha-icon icon="mdi:calendar-clock-outline"></ha-icon><b>No fixtures loaded</b><span>${this._worldCup.loading ? "Fetching today's schedule…" : this.esc(this._worldCup.error || "Try refreshing again in a moment.")}</span></div>`}
+            </div>
+          </section>
+        </div>
+        <div class="col">
+          <section class="gl wc-card">
+            <div class="slbl">Group Tables</div>
+            <div class="wc-groups">
+              ${groups.length
+                ? groups.map(group => this.worldCupGroup(group)).join("")
+                : `<div class="personal-empty compact"><ha-icon icon="mdi:table-large"></ha-icon><b>Standings unavailable</b><span>${this._worldCup.loading ? "Loading group standings…" : this.esc(this._worldCup.error || "The standings feed did not respond.")}</span></div>`}
+            </div>
+          </section>
+        </div>
+      </div>
+    </div>`;
+  }
+
+  worldCupFeatured(match) {
+    const stats = Array.isArray(match?.stats) ? match.stats.slice(0, 6) : [];
+    const home = match?.teams?.find(t => t.side === "home") || match?.teams?.[0];
+    const away = match?.teams?.find(t => t.side === "away") || match?.teams?.[1];
+    return `<div class="wc-featured">
+      <div class="wc-scoreline">
+        <div class="wc-team">
+          ${home?.logo ? `<img class="wc-logo" src="${home.logo}" alt="${this.esc(home.name)}">` : `<div class="wc-logo ph">${this.esc((home?.short || "?").slice(0, 3))}</div>`}
+          <div class="wc-team-name">${this.esc(home?.name || "--")}</div>
+        </div>
+        <div class="wc-score-mid">
+          <div class="wc-score">${this.wcScore(match, "home")}<span>:</span>${this.wcScore(match, "away")}</div>
+          <div class="wc-status ${match?.state === "in" ? "live" : ""}">${this.esc(this.wcStatusLabel(match))}</div>
+        </div>
+        <div class="wc-team right">
+          ${away?.logo ? `<img class="wc-logo" src="${away.logo}" alt="${this.esc(away.name)}">` : `<div class="wc-logo ph">${this.esc((away?.short || "?").slice(0, 3))}</div>`}
+          <div class="wc-team-name">${this.esc(away?.name || "--")}</div>
+        </div>
+      </div>
+      <div class="wc-meta">
+        <div><b>${this.esc(match?.phase || "World Cup")}</b><span>Stage</span></div>
+        <div><b>${this.esc(match?.venue || "Venue TBC")}</b><span>Venue</span></div>
+        <div><b>${this.esc(match?.status || "Scheduled")}</b><span>Match status</span></div>
+      </div>
+      ${stats.length ? `<div class="wc-stats">${stats.map(stat => `
+        <div class="wc-stat">
+          <ha-icon icon="${this.wcStatIcon(stat.label)}"></ha-icon>
+          <b>${this.esc(stat.home)}<span>${this.esc(stat.label)}</span>${this.esc(stat.away)}</b>
+        </div>
+      `).join("")}</div>` : `<div class="wc-empty-note">${match?.state === "in" ? "Live stats will appear as the match feed updates." : "Detailed match stats appear automatically once ESPN publishes them for a live game."}</div>`}
+    </div>`;
+  }
+
+  worldCupMatchRow(match) {
+    return `<div class="wc-row ${match?.state === "in" ? "live" : ""}">
+      <div class="wc-row-teams">
+        <div class="wc-row-team">${this.esc(this.wcTeam(match, "home"))}</div>
+        <div class="wc-row-team">${this.esc(this.wcTeam(match, "away"))}</div>
+      </div>
+      <div class="wc-row-score">
+        <b>${this.wcScore(match, "home")} - ${this.wcScore(match, "away")}</b>
+        <span>${this.esc(this.wcStatusLabel(match))}</span>
+      </div>
+    </div>`;
+  }
+
+  worldCupGroup(group) {
+    return `<section class="wc-group">
+      <div class="wc-group-name">${this.esc(group?.name || "Group")}</div>
+      <div class="wc-table">
+        <div class="wc-table-head">
+          <span>Team</span><span>P</span><span>GD</span><span>Pts</span>
+        </div>
+        ${(group?.entries || []).map(team => `
+          <div class="wc-table-row">
+            <span class="team">${this.esc(team.team || "--")}</span>
+            <span>${this.esc(team.played ?? "-")}</span>
+            <span>${this.esc(team.gd ?? "-")}</span>
+            <span class="pts">${this.esc(team.points ?? "-")}</span>
+          </div>
+        `).join("")}
+      </div>
+    </section>`;
+  }
+
   agendaSection() {
     const calendars = this.calendarEntities();
     const events = this._agenda.events || [];
@@ -2359,8 +2555,11 @@ button{font:inherit;color:inherit;border:0;text-align:inherit;cursor:pointer;bac
 
 /* Shell — full viewport, no max-width */
 .dash{width:100%;height:100dvh;min-height:100vh;max-width:none;border-radius:0;display:flex;flex-direction:column;font-family:-apple-system,BlinkMacSystemFont,"SF Pro Display",system-ui,sans-serif;position:relative;background:#060818;overflow-y:auto;overflow-x:hidden;-webkit-overflow-scrolling:touch;overscroll-behavior:contain}
-.bg{position:absolute;inset:0;background:radial-gradient(ellipse 80% 60% at 15% 85%,rgba(0,180,255,.42),transparent 55%),radial-gradient(ellipse 60% 50% at 80% 10%,rgba(130,60,255,.38),transparent 55%),radial-gradient(ellipse 50% 40% at 50% 50%,rgba(30,10,80,.8),transparent 70%),linear-gradient(160deg,#06091c 0%,#0b0630 40%,#050c1e 100%);pointer-events:none}
-.bg::after{content:"";position:absolute;inset:0;background:radial-gradient(ellipse 30% 20% at 10% 70%,rgba(0,220,255,.22),transparent 50%)}
+.bg{position:absolute;inset:0;pointer-events:none}
+.bg.night{background:radial-gradient(ellipse 80% 60% at 15% 85%,rgba(0,180,255,.42),transparent 55%),radial-gradient(ellipse 60% 50% at 80% 10%,rgba(130,60,255,.38),transparent 55%),radial-gradient(ellipse 50% 40% at 50% 50%,rgba(30,10,80,.8),transparent 70%),linear-gradient(160deg,#06091c 0%,#0b0630 40%,#050c1e 100%)}
+.bg.night::after{content:"";position:absolute;inset:0;background:radial-gradient(ellipse 30% 20% at 10% 70%,rgba(0,220,255,.22),transparent 50%)}
+.bg.day{background-image:linear-gradient(180deg,rgba(244,251,255,.08),rgba(3,8,23,.14)),linear-gradient(160deg,rgba(9,20,44,.18),rgba(9,20,44,.34)),url("https://teslakortingscode.com/ha/daytime-bg.png");background-size:cover;background-position:center center;background-repeat:no-repeat}
+.bg.day::after{content:"";position:absolute;inset:0;background:linear-gradient(180deg,rgba(9,18,38,.14),rgba(9,18,38,.24) 32%,rgba(9,18,38,.52) 100%)}
 .z1{position:relative;z-index:1}
 
 /* Glass */
@@ -2427,6 +2626,54 @@ button{font:inherit;color:inherit;border:0;text-align:inherit;cursor:pointer;bac
 .personal-empty ha-icon{--mdc-icon-size:34px;color:rgba(167,139,250,.72)}
 .personal-empty b{font-size:15px;color:rgba(255,255,255,.82)}
 .personal-empty span{max-width:360px;font-size:11px;line-height:1.45;color:rgba(255,255,255,.45)}
+
+/* World Cup */
+.wc-card{padding:10px}
+.wc-head{display:flex;align-items:flex-start;justify-content:space-between;gap:10px;margin-bottom:8px}
+.wc-title{font-size:22px;font-weight:800;color:rgba(255,255,255,.94);letter-spacing:-.5px;line-height:1.05}
+.wc-sub{font-size:11px;color:rgba(255,255,255,.46);margin-top:3px}
+.wc-refresh{width:30px;height:30px;border-radius:50%;display:flex;align-items:center;justify-content:center;background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.12)!important}
+.wc-refresh ha-icon{--mdc-icon-size:15px;color:rgba(255,255,255,.68)}
+.wc-featured{display:flex;flex-direction:column;gap:10px}
+.wc-scoreline{display:grid;grid-template-columns:1fr auto 1fr;gap:10px;align-items:center;padding:12px;border-radius:14px;background:linear-gradient(145deg,rgba(255,255,255,.085),rgba(255,255,255,.035));border:1px solid rgba(255,255,255,.08)}
+.wc-team{display:flex;align-items:center;gap:9px;min-width:0}
+.wc-team.right{justify-content:flex-end;text-align:right}
+.wc-logo{width:42px;height:42px;border-radius:50%;object-fit:contain;background:rgba(255,255,255,.96);padding:3px;flex-shrink:0}
+.wc-logo.ph{display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:900;color:#111827}
+.wc-team-name{font-size:15px;font-weight:700;color:rgba(255,255,255,.92);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.wc-score-mid{text-align:center}
+.wc-score{font-size:38px;font-weight:900;letter-spacing:-1.6px;line-height:1;color:rgba(255,255,255,.97)}
+.wc-score span{font-size:24px;color:rgba(255,255,255,.36);margin:0 4px}
+.wc-status{display:inline-flex;align-items:center;justify-content:center;margin-top:5px;padding:4px 10px;border-radius:999px;background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.10);font-size:10px;font-weight:800;color:rgba(255,255,255,.68);text-transform:uppercase;letter-spacing:.45px}
+.wc-status.live{background:rgba(239,68,68,.14);border-color:rgba(239,68,68,.26);color:#fecaca}
+.wc-meta{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:7px}
+.wc-meta div,.wc-stat{padding:8px 9px;border-radius:11px;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.08)}
+.wc-meta b{display:block;font-size:14px;color:rgba(255,255,255,.90);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.wc-meta span{display:block;margin-top:3px;font-size:9px;color:rgba(255,255,255,.40);text-transform:uppercase;letter-spacing:.42px}
+.wc-stats{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:7px}
+.wc-stat{display:flex;align-items:center;gap:8px}
+.wc-stat ha-icon{--mdc-icon-size:18px;color:#a78bfa;flex-shrink:0}
+.wc-stat b{display:flex;align-items:baseline;justify-content:space-between;gap:8px;width:100%;font-size:18px;color:rgba(255,255,255,.92)}
+.wc-stat span{font-size:9px;font-weight:700;color:rgba(255,255,255,.42);text-transform:uppercase;letter-spacing:.42px}
+.wc-empty-note{padding:9px 10px;border-radius:11px;background:rgba(255,255,255,.04);border:1px dashed rgba(255,255,255,.10);font-size:11px;line-height:1.45;color:rgba(255,255,255,.48)}
+.wc-match-list{display:flex;flex-direction:column;gap:6px}
+.wc-row{display:grid;grid-template-columns:1fr auto;gap:10px;align-items:center;padding:9px 10px;border-radius:12px;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.08)}
+.wc-row.live{background:rgba(239,68,68,.08);border-color:rgba(239,68,68,.18)}
+.wc-row-teams{min-width:0}
+.wc-row-team{font-size:13px;font-weight:700;color:rgba(255,255,255,.86);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.wc-row-team + .wc-row-team{margin-top:3px;color:rgba(255,255,255,.62)}
+.wc-row-score{text-align:right}
+.wc-row-score b{display:block;font-size:17px;color:rgba(255,255,255,.94);line-height:1}
+.wc-row-score span{display:block;margin-top:3px;font-size:10px;color:rgba(255,255,255,.44)}
+.wc-groups{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}
+.wc-group{padding:9px;border-radius:12px;background:rgba(255,255,255,.045);border:1px solid rgba(255,255,255,.08)}
+.wc-group-name{font-size:12px;font-weight:800;color:rgba(255,255,255,.86);letter-spacing:.3px;margin-bottom:7px}
+.wc-table{display:flex;flex-direction:column;gap:3px}
+.wc-table-head,.wc-table-row{display:grid;grid-template-columns:minmax(0,1fr) 26px 34px 28px;gap:8px;align-items:center}
+.wc-table-head{font-size:8px;font-weight:900;color:rgba(255,255,255,.38);text-transform:uppercase;letter-spacing:.55px;padding:0 2px 3px}
+.wc-table-row{padding:6px 8px;border-radius:9px;background:rgba(255,255,255,.045);font-size:11px;color:rgba(255,255,255,.72)}
+.wc-table-row .team{font-weight:700;color:rgba(255,255,255,.9);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.wc-table-row .pts{font-weight:900;color:#fbbf24}
 
 /* Press/active */
 button{transition:transform .08s ease,filter .08s ease,box-shadow .1s}
