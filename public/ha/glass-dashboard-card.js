@@ -2719,13 +2719,23 @@ button.is-pressed{transform:scale(.93)!important;filter:brightness(1.2)}
 .tc{overflow:hidden;padding:0}
 /* Single wrapper gives header + car image one unified dark background */
 .tc-hero{background:linear-gradient(180deg,rgba(16,10,38,.98) 0%,rgba(5,5,18,.99) 100%)}
+.theme-day .tc-hero{
+  background:
+    radial-gradient(circle at 18% 22%,rgba(255,255,255,.16),transparent 28%),
+    radial-gradient(circle at 82% 18%,rgba(110,231,255,.14),transparent 30%),
+    linear-gradient(180deg,rgba(64,84,148,.62) 0%,rgba(33,45,95,.78) 56%,rgba(28,31,76,.88) 100%);
+}
 .tc-top{display:flex;justify-content:space-between;align-items:center;padding:9px 12px 2px;background:transparent}
+.theme-day .tc-top{background:linear-gradient(180deg,rgba(255,255,255,.05),transparent)}
 .tc-brand{display:flex;align-items:center;gap:8px}
 .tc-name{font-size:21px;font-weight:800;color:rgba(255,255,255,.94);letter-spacing:-.4px}
 .tc-sub{font-size:11px;color:rgba(255,255,255,.44);letter-spacing:.8px;text-transform:uppercase;margin-top:0}
 .tc-img-wrap{width:100%;height:120px;position:relative;background:transparent;display:flex;align-items:center;justify-content:center;overflow:hidden}
+.theme-day .tc-img-wrap{background:linear-gradient(180deg,rgba(255,255,255,.03),rgba(255,255,255,0))}
 .tc-glow{position:absolute;bottom:0;left:0;right:0;height:50px;background:radial-gradient(ellipse 90% 100% at 50% 100%,rgba(60,90,220,.2),transparent 70%);pointer-events:none}
+.theme-day .tc-glow{background:radial-gradient(ellipse 90% 100% at 50% 100%,rgba(125,211,252,.26),transparent 70%)}
 .tc-car{width:98%;height:100%;object-fit:contain;object-position:center center;filter:drop-shadow(0 13px 19px rgba(0,0,0,.64));pointer-events:none;user-select:none;position:relative;z-index:1;transform:translateY(0)}
+.theme-day .tc-car{filter:drop-shadow(0 14px 18px rgba(10,18,42,.38))}
 .tc.charging .tc-glow{background:radial-gradient(ellipse 90% 100% at 50% 100%,rgba(52,211,153,.30),transparent 70%);animation:charge-glow 2.8s ease-in-out infinite;animation-delay:var(--charge-phase)}
 .tc-stats{padding:7px 11px 5px}
 .tc-batt-row{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:5px}
