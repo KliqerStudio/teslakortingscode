@@ -112,11 +112,12 @@ class GlassDashboardCard extends HTMLElement {
     this.loadEnergy();
     this.loadAgenda();
     this.loadWorldCup();
+    const freezeForWorldCupStream = this._tab === "wc" && this.hasActiveWorldCupStream();
     // Only re-render when relevant entity states actually changed.
     // This prevents the Tesla image (and everything else) from flickering
     // every time HA sends ANY state update (which can be every few seconds).
     const sig = this._stateSig();
-    if (sig !== this._lastSig) {
+    if (!freezeForWorldCupStream && sig !== this._lastSig) {
       this._lastSig = sig;
       clearTimeout(this._renderDebounce);
       const pickerDelay = Math.max(0, this._colorPickerOpenUntil - Date.now());
@@ -793,6 +794,11 @@ class GlassDashboardCard extends HTMLElement {
     if (text.includes("save")) return "mdi:hand-back-right-outline";
     if (text.includes("pass")) return "mdi:swap-horizontal";
     return "mdi:soccer";
+  }
+  hasActiveWorldCupStream() {
+    return this._tab === "wc"
+      && this._worldCup?.featured?.state === "in"
+      && Boolean(this._worldCup?.featured?.stream?.hlsUrl);
   }
   aqLabel(val) {
     const n = Number(val);
