@@ -682,9 +682,6 @@ class GlassDashboardCard extends HTMLElement {
     return m[state] || "mdi:weather-partly-cloudy";
   }
   isNightNow() {
-    const sun = this._hass?.states?.[this.entities.sun]?.state;
-    if (sun === "below_horizon") return true;
-    if (sun === "above_horizon") return false;
     const now = new Date();
     const hour = Number(now.toLocaleTimeString("en-GB", {
       hour: "2-digit",
@@ -692,6 +689,11 @@ class GlassDashboardCard extends HTMLElement {
       timeZone: "Europe/Amsterdam",
     }).slice(0, 2));
     if (!Number.isFinite(hour)) return false;
+    if (hour >= 21 || hour < 6) return true;
+    if (hour >= 7 && hour < 20) return false;
+    const sun = this._hass?.states?.[this.entities.sun]?.state;
+    if (sun === "below_horizon") return true;
+    if (sun === "above_horizon") return false;
     return hour < 6 || hour >= 21;
   }
   displayWeatherState(state) {
@@ -1215,7 +1217,7 @@ class GlassDashboardCard extends HTMLElement {
     const h = Number(parts.find(part => part.type === "hour")?.value ?? new Date().getHours());
     if (h >= 5 && h < 12) return "Good morning";
     if (h >= 12 && h < 17) return "Good afternoon";
-    if (h >= 17 && h < 22) return "Good evening";
+    if (h >= 17 && h < 21) return "Good evening";
     return "Good night";
   }
   toggleFullscreen() {
@@ -2303,6 +2305,7 @@ class GlassDashboardCard extends HTMLElement {
     const stats = Array.isArray(match?.stats) ? match.stats.slice(0, 6) : [];
     const home = match?.teams?.find(t => t.side === "home") || match?.teams?.[0];
     const away = match?.teams?.find(t => t.side === "away") || match?.teams?.[1];
+    const stream = match?.stream;
     return `<div class="wc-featured">
       <div class="wc-scoreline">
         <div class="wc-team">
@@ -2323,6 +2326,23 @@ class GlassDashboardCard extends HTMLElement {
         <div><b>${this.esc(match?.venue || "Venue TBC")}</b><span>Venue</span></div>
         <div><b>${this.esc(match?.status || "Scheduled")}</b><span>Match status</span></div>
       </div>
+      ${match?.state === "in" ? `
+        <div class="wc-video-card">
+          <div class="wc-video-head">
+            <div>
+              <div class="wc-video-title">Live match stream</div>
+              <div class="wc-video-sub">${this.esc(stream?.provider || "NOS")} ${stream?.title ? `· ${this.esc(stream.title)}` : ""}</div>
+            </div>
+            ${stream?.pageUrl ? `<a class="wc-watch-link" href="${stream.pageUrl}" target="_blank" rel="noreferrer">Open NOS</a>` : ""}
+          </div>
+          ${stream?.hlsUrl ? `
+            <video class="wc-video" src="${stream.hlsUrl}" controls playsinline muted preload="metadata"></video>
+            <div class="wc-video-note">Live stream availability depends on official Dutch rights and your current location in the Netherlands.</div>
+          ` : `
+            <div class="wc-empty-note">The official NOS stream page is available, but the direct video stream was not exposed yet. Use the NOS button to watch live.</div>
+          `}
+        </div>
+      ` : ""}
       ${stats.length ? `<div class="wc-stats">${stats.map(stat => `
         <div class="wc-stat">
           <ha-icon icon="${this.wcStatIcon(stat.label)}"></ha-icon>
@@ -2650,6 +2670,13 @@ button{font:inherit;color:inherit;border:0;text-align:inherit;cursor:pointer;bac
 .wc-meta div,.wc-stat{padding:8px 9px;border-radius:11px;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.08)}
 .wc-meta b{display:block;font-size:14px;color:rgba(255,255,255,.90);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .wc-meta span{display:block;margin-top:3px;font-size:9px;color:rgba(255,255,255,.40);text-transform:uppercase;letter-spacing:.42px}
+.wc-video-card{padding:10px;border-radius:13px;background:linear-gradient(145deg,rgba(255,255,255,.07),rgba(255,255,255,.03));border:1px solid rgba(255,255,255,.08)}
+.wc-video-head{display:flex;align-items:flex-start;justify-content:space-between;gap:10px;margin-bottom:8px}
+.wc-video-title{font-size:14px;font-weight:800;color:rgba(255,255,255,.92)}
+.wc-video-sub{font-size:10px;color:rgba(255,255,255,.44);margin-top:2px}
+.wc-watch-link{display:inline-flex;align-items:center;justify-content:center;padding:6px 10px;border-radius:999px;background:rgba(255,255,255,.09);border:1px solid rgba(255,255,255,.12);font-size:10px;font-weight:800;color:rgba(255,255,255,.86);text-decoration:none;white-space:nowrap}
+.wc-video{display:block;width:100%;aspect-ratio:16 / 9;border-radius:12px;background:#050816;object-fit:cover;border:1px solid rgba(255,255,255,.08)}
+.wc-video-note{margin-top:7px;font-size:10px;line-height:1.4;color:rgba(255,255,255,.42)}
 .wc-stats{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:7px}
 .wc-stat{display:flex;align-items:center;gap:8px}
 .wc-stat ha-icon{--mdc-icon-size:18px;color:#a78bfa;flex-shrink:0}

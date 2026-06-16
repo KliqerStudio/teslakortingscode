@@ -40,6 +40,12 @@ type Match = {
   period: number;
   teams: MatchTeam[];
   stats?: MatchStat[];
+  stream?: {
+    provider: string;
+    title: string;
+    pageUrl: string;
+    hlsUrl: string;
+  } | null;
 };
 
 async function getJson(url: string) {
@@ -56,6 +62,22 @@ async function getJson(url: string) {
   }
 
   return (await response.json()) as JsonObject;
+}
+
+async function getText(url: string) {
+  const response = await fetch(url, {
+    cache: "no-store",
+    headers: {
+      Accept: "text/html,application/xhtml+xml",
+      "User-Agent": "teslakortingscode-worldcup/1.0",
+    },
+  });
+
+  if (!response.ok) {
+    throw new Error(`Upstream HTML request failed: ${response.status} ${url}`);
+  }
+
+  return await response.text();
 }
 
 function asArray<T = JsonObject>(value: unknown): T[] {
@@ -166,6 +188,47 @@ function parseGroups(standings: JsonObject) {
   });
 }
 
+function decodeNosUrl(value: string) {
+  return value
+    .replace(/\\u0026/g, "&")
+    .replace(/&amp;/g, "&");
+}
+
+async function findNosLiveStream() {
+  const liveHtml = await getText("https://nos.nl/live");
+  const slugs = [...liveHtml.matchAll(/\/livestream\/[a-z0-9-]+/gi)]
+    .map((match) => match[0])
+    .filter((slug, index, all) => all.indexOf(slug) === index);
+
+  const currentSlug =
+    slugs.find((slug) => slug.includes("kijk-hier-live-mee")) ||
+    slugs.find((slug) => slug.includes("wk-voetbal")) ||
+    slugs[0];
+
+  if (!currentSlug) return null;
+
+  const pageUrl = `https://nos.nl${currentSlug}`;
+  const pageHtml = await getText(pageUrl);
+  const titleMatch = pageHtml.match(/<title>([^<]+)<\/title>/i);
+  const hlsMatch = pageHtml.match(/https:\/\/resolver\.streaming\.api\.nos\.nl\/stream\?stream=[^"'\\]+?profile=hls_unencrypted[^"'\\]+/i);
+
+  if (!hlsMatch) {
+    return {
+      provider: "NOS",
+      title: titleMatch?.[1]?.replace(/\s*\|\s*NOS.*$/i, "").trim() || "NOS Live",
+      pageUrl,
+      hlsUrl: "",
+    };
+  }
+
+  return {
+    provider: "NOS",
+    title: titleMatch?.[1]?.replace(/\s*\|\s*NOS.*$/i, "").trim() || "NOS Live",
+    pageUrl,
+    hlsUrl: decodeNosUrl(hlsMatch[0]),
+  };
+}
+
 export async function OPTIONS() {
   return new NextResponse(null, { status: 204, headers: CORS_HEADERS });
 }
@@ -194,6 +257,23 @@ export async function GET() {
         };
       } catch {
         featuredWithStats = featured;
+      }
+    }
+
+    if (featuredWithStats?.state === "in") {
+      try {
+        const nosStream = await findNosLiveStream();
+        if (nosStream) {
+          featuredWithStats = {
+            ...featuredWithStats,
+            stream: nosStream,
+          };
+        }
+      } catch {
+        featuredWithStats = {
+          ...featuredWithStats,
+          stream: null,
+        };
       }
     }
 
