@@ -27,7 +27,6 @@ class GlassDashboardCard extends HTMLElement {
     this._energyRate = 0.29; // €/kWh — change to match your contract
     this._agenda = { events: [], loading: false, loadedAt: 0, calendarsKey: "" };
     this._worldCup = { matches: [], groups: [], featured: null, loading: false, loadedAt: 0, error: "" };
-    this._wcPlayback = { active: false, matchId: "", hlsUrl: "", pageUrl: "", title: "", provider: "" };
     // Presence detection
     this._presence = {
       stream: null, video: null, canvas: null, ctx: null,
@@ -113,12 +112,11 @@ class GlassDashboardCard extends HTMLElement {
     this.loadEnergy();
     this.loadAgenda();
     this.loadWorldCup();
-    const freezeForWorldCupStream = this._tab === "wc" && this.hasActiveWorldCupStream();
     // Only re-render when relevant entity states actually changed.
     // This prevents the Tesla image (and everything else) from flickering
     // every time HA sends ANY state update (which can be every few seconds).
     const sig = this._stateSig();
-    if (!freezeForWorldCupStream && sig !== this._lastSig) {
+    if (sig !== this._lastSig) {
       this._lastSig = sig;
       clearTimeout(this._renderDebounce);
       const pickerDelay = Math.max(0, this._colorPickerOpenUntil - Date.now());
@@ -633,17 +631,7 @@ class GlassDashboardCard extends HTMLElement {
         loadedAt: Date.now(),
         error: "",
       };
-      if (this._wcPlayback.active) {
-        const nextStream = data?.featured?.stream?.hlsUrl || "";
-        if (nextStream && this._wcPlayback.matchId === data?.featured?.id && this._wcPlayback.hlsUrl !== nextStream) {
-          this._wcPlayback.hlsUrl = nextStream;
-          this._wcPlayback.pageUrl = data?.featured?.stream?.pageUrl || this._wcPlayback.pageUrl;
-          this._wcPlayback.title = data?.featured?.stream?.title || this._wcPlayback.title;
-          this._wcPlayback.provider = data?.featured?.stream?.provider || this._wcPlayback.provider;
-        }
-      } else {
-        this.render();
-      }
+      this.render();
     } catch (err) {
       console.warn("[GlassDash] World Cup load failed:", err);
       this._worldCup = {
@@ -652,7 +640,7 @@ class GlassDashboardCard extends HTMLElement {
         loadedAt: Date.now(),
         error: String(err?.message || err || "Could not load World Cup data."),
       };
-      if (!this._wcPlayback.active) this.render();
+      this.render();
     }
   }
 
@@ -805,28 +793,6 @@ class GlassDashboardCard extends HTMLElement {
     if (text.includes("save")) return "mdi:hand-back-right-outline";
     if (text.includes("pass")) return "mdi:swap-horizontal";
     return "mdi:soccer";
-  }
-  hasActiveWorldCupStream() {
-    return this._tab === "wc"
-      && this._wcPlayback?.active
-      && Boolean(this._wcPlayback?.hlsUrl);
-  }
-  startWorldCupPlayback(match) {
-    const stream = match?.stream;
-    if (!stream?.hlsUrl) return;
-    this._wcPlayback = {
-      active: true,
-      matchId: match?.id || "",
-      hlsUrl: stream.hlsUrl,
-      pageUrl: stream.pageUrl || "",
-      title: stream.title || "",
-      provider: stream.provider || "NOS",
-    };
-    this.render();
-  }
-  stopWorldCupPlayback() {
-    this._wcPlayback = { active: false, matchId: "", hlsUrl: "", pageUrl: "", title: "", provider: "" };
-    this.render();
   }
   aqLabel(val) {
     const n = Number(val);
@@ -1561,12 +1527,6 @@ class GlassDashboardCard extends HTMLElement {
       this._worldCup.loadedAt = 0;
       this.loadWorldCup(true);
       this.render();
-    });
-    this.shadowRoot.querySelector("[data-action='wc-play-live']")?.addEventListener("click", () => {
-      if (this._worldCup?.featured) this.startWorldCupPlayback(this._worldCup.featured);
-    });
-    this.shadowRoot.querySelector("[data-action='wc-stop-live']")?.addEventListener("click", () => {
-      this.stopWorldCupPlayback();
     });
 
     // Energy period tabs
@@ -2345,9 +2305,6 @@ class GlassDashboardCard extends HTMLElement {
     const stats = Array.isArray(match?.stats) ? match.stats.slice(0, 6) : [];
     const home = match?.teams?.find(t => t.side === "home") || match?.teams?.[0];
     const away = match?.teams?.find(t => t.side === "away") || match?.teams?.[1];
-    const stream = match?.stream;
-    const playback = this._wcPlayback;
-    const isPlayingHere = playback.active && playback.matchId === match?.id && playback.hlsUrl;
     return `<div class="wc-featured">
       <div class="wc-scoreline">
         <div class="wc-team">
@@ -2368,34 +2325,6 @@ class GlassDashboardCard extends HTMLElement {
         <div><b>${this.esc(match?.venue || "Venue TBC")}</b><span>Venue</span></div>
         <div><b>${this.esc(match?.status || "Scheduled")}</b><span>Match status</span></div>
       </div>
-      ${match?.state === "in" ? `
-        <div class="wc-video-card">
-          <div class="wc-video-head">
-            <div>
-              <div class="wc-video-title">Live match stream</div>
-              <div class="wc-video-sub">${this.esc((isPlayingHere ? playback.provider : stream?.provider) || "NOS")} ${(isPlayingHere ? playback.title : stream?.title) ? `· ${this.esc((isPlayingHere ? playback.title : stream?.title) || "")}` : ""}</div>
-            </div>
-            <div class="wc-video-actions">
-              ${stream?.pageUrl ? `<a class="wc-watch-link" href="${stream.pageUrl}" target="_blank" rel="noreferrer">Open NOS</a>` : ""}
-              ${isPlayingHere ? `<button class="wc-stop-btn" data-action="wc-stop-live">Close</button>` : ""}
-            </div>
-          </div>
-          ${isPlayingHere ? `
-            <video class="wc-video" src="${playback.hlsUrl}" controls playsinline autoplay preload="metadata"></video>
-            <div class="wc-video-note">This player was started locally from your tap, so the dashboard now leaves it alone while it plays.</div>
-          ` : stream?.hlsUrl ? `
-            <div class="wc-video-placeholder">
-              <button class="wc-play-btn" data-action="wc-play-live">
-                <ha-icon icon="mdi:play-circle"></ha-icon>
-                <span>Play live on NOS here</span>
-              </button>
-            </div>
-            <div class="wc-video-note">Tap play to start the official NOS live stream inside the dashboard. This avoids constant background refreshes while the player is idle.</div>
-          ` : `
-            <div class="wc-empty-note">The official NOS stream page is available, but the direct video stream was not exposed yet. Use the NOS button to watch live.</div>
-          `}
-        </div>
-      ` : ""}
       ${stats.length ? `<div class="wc-stats">${stats.map(stat => `
         <div class="wc-stat">
           <ha-icon icon="${this.wcStatIcon(stat.label)}"></ha-icon>
@@ -2723,19 +2652,6 @@ button{font:inherit;color:inherit;border:0;text-align:inherit;cursor:pointer;bac
 .wc-meta div,.wc-stat{padding:8px 9px;border-radius:11px;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.08)}
 .wc-meta b{display:block;font-size:14px;color:rgba(255,255,255,.90);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .wc-meta span{display:block;margin-top:3px;font-size:9px;color:rgba(255,255,255,.40);text-transform:uppercase;letter-spacing:.42px}
-.wc-video-card{padding:10px;border-radius:13px;background:linear-gradient(145deg,rgba(255,255,255,.07),rgba(255,255,255,.03));border:1px solid rgba(255,255,255,.08)}
-.wc-video-head{display:flex;align-items:flex-start;justify-content:space-between;gap:10px;margin-bottom:8px}
-.wc-video-title{font-size:14px;font-weight:800;color:rgba(255,255,255,.92)}
-.wc-video-sub{font-size:10px;color:rgba(255,255,255,.44);margin-top:2px}
-.wc-video-actions{display:flex;align-items:center;gap:8px;flex-shrink:0}
-.wc-watch-link{display:inline-flex;align-items:center;justify-content:center;padding:6px 10px;border-radius:999px;background:rgba(255,255,255,.09);border:1px solid rgba(255,255,255,.12);font-size:10px;font-weight:800;color:rgba(255,255,255,.86);text-decoration:none;white-space:nowrap}
-.wc-stop-btn{display:inline-flex;align-items:center;justify-content:center;padding:6px 10px;border-radius:999px;background:rgba(248,113,113,.12);border:1px solid rgba(248,113,113,.18)!important;font-size:10px;font-weight:800;color:#fecaca;white-space:nowrap}
-.wc-video-placeholder{display:flex;align-items:center;justify-content:center;width:100%;aspect-ratio:16 / 9;border-radius:12px;background:linear-gradient(145deg,rgba(10,16,36,.92),rgba(24,33,70,.88));border:1px solid rgba(255,255,255,.08)}
-.wc-play-btn{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;min-width:220px;padding:20px 18px;border-radius:18px;background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.14)!important;box-shadow:0 12px 30px rgba(0,0,0,.22)}
-.wc-play-btn ha-icon{--mdc-icon-size:40px;color:#f8fafc}
-.wc-play-btn span{font-size:13px;font-weight:800;color:rgba(255,255,255,.92);letter-spacing:.1px}
-.wc-video{display:block;width:100%;aspect-ratio:16 / 9;border-radius:12px;background:#050816;object-fit:cover;border:1px solid rgba(255,255,255,.08)}
-.wc-video-note{margin-top:7px;font-size:10px;line-height:1.4;color:rgba(255,255,255,.42)}
 .wc-stats{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:7px}
 .wc-stat{display:flex;align-items:center;gap:8px}
 .wc-stat ha-icon{--mdc-icon-size:18px;color:#a78bfa;flex-shrink:0}
